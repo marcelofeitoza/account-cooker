@@ -84,7 +84,7 @@ The one-session build is complete only when all P0 gates are green:
 
 - Mainnet or devnet bot execution.
 - Hiding or laundering a common funding source.
-- A ZK pool, mixer, relay, or Cloak integration.
+- A ZK pool, mixer, relay, or external privacy-protocol integration.
 - Cross-host consensus or a distributed database.
 - DAO voting, airdrop farming, referral farming, NFT manipulation, or wash volume.
 - Bridges, arbitrary plugin loading, or unreviewed protocol calls.
@@ -530,6 +530,7 @@ Done means a new reviewer can:
 7. verify that recovery does not duplicate it;
 8. reproduce the 1,000-agent trace and evaluator report;
 9. understand exactly which privacy properties were and were not measured;
-10. verify that the Git history contains no Cloak code, secrets, or unsupported claims.
+10. verify that the Git history contains no external private code, secrets, or
+    unsupported claims.
 
 Anything less remains a draft.

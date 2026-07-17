@@ -225,7 +225,8 @@ Before every push:
 - inspect git status and staged diff;
 - scan tracked files for keypair arrays, seed phrases, bearer tokens, RPC credentials,
   private URLs, and local databases;
-- confirm no Cloak source, fixture, cached transaction corpus, or private documentation;
+- confirm no external private source, fixture, cached transaction corpus, or private
+  documentation;
 - confirm no competitor source was copied;
 - record public dependencies and licenses;
 - verify evidence uses generated aliases and local Surfpool signatures.
