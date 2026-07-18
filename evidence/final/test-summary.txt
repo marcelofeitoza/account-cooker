@@ -1,0 +1,11 @@
+PASS cli_workflow
+PASS native_transfer
+PASS classic_spl_transfer
+PASS jupiter_exact_input_swap
+PASS native_stake_lifecycle
+PASS failure_and_same_signature_reconciliation
+PASS six_real_sigkill_restart_checkpoints
+PASS virtual_soak_canonical
+PASS surfpool_soak_canonical_1000_transactions
+PASS five_seed_comparative_evaluation
+PASS formatting_clippy_tests_security_and_release_build

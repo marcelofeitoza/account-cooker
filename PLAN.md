@@ -1,8 +1,8 @@
 # Account Cooker Master Plan
 
-Status: source implementation and Block E records complete; canonical evidence, two
-clean-clone release verifications, sponsor AI-assistance eligibility, and Marcelo's
-approval remain before the draft can leave draft state.
+Status: all engineering and release-proof gates are complete. Draft PR publication,
+sponsor AI-assistance eligibility, and Marcelo's approval remain before the draft can
+leave draft state.
 
 This document is the public implementation and release contract for the bounty build. It
 defines what is implemented, what evidence is still required, which claims are permitted,
@@ -19,10 +19,9 @@ and which features remain outside the completion boundary.
 | E | evaluator, security/provenance, public docs, Obsidian record | complete |
 | F | canonical soaks, sanitized evidence, two clean-clone proofs, draft PR handoff | in progress |
 
-"Complete" in this table describes implemented source and focused/reduced verification,
-not canonical results. Block F is deliberately separate: only its clean-tree canonical
-artifacts may support the final reported scale and transaction counts. There is currently
-no `evidence/final` pack.
+Blocks A-E describe implemented source and focused verification. Block F additionally has
+clean-tree canonical evidence and two independent clean-clone reproductions; its remaining
+work is public handoff and the two external approval gates.
 
 ## 1. Objective
 
@@ -471,21 +470,22 @@ The complete evidence requirements are in docs/VALIDATION.md.
 - The expanded reduced full demo, six process-crash cases, and persistent Surfpool restart
   pass; only canonical-scale Block F artifacts may support final scale claims.
 
-### Block F: canonical release proof in progress
+### Block F: engineering proof complete; handoff in progress
 
-- Run exactly five seeds over 1,000 agents for 30 virtual days from a clean commit.
-- Run at least 1,000 locally signed Surfpool soak transactions with response loss, runtime
+- Completed exactly five seeds over 1,000 agents for 30 virtual days from a clean commit.
+- Completed 1,000 locally signed Surfpool soak transactions with response loss, runtime
   reconstruction, persistent Surfpool restart, and reconciliation without resend.
-- Generate and review the sanitized checksum-bearing `evidence/final` pack.
-- Reproduce the complete canonical command twice from fresh clones and fresh Surfpool
-  state without a public-network write.
+- Generated and reviewed the sanitized checksum-bearing `evidence/final` pack.
+- Reproduced the complete canonical command twice from fresh clones and fresh offline
+  Surfpool state; deterministic metrics and all five virtual trace hashes match.
 - Push the implementation and evidence commits and update the draft PR with measured
   results and limitations.
 - Resolve human-only/AI-assistance eligibility and obtain Marcelo's approval before any
   submission or transition out of draft.
 
-Gate F passes only when committed canonical evidence matches its source commit, both
-clean-clone runs pass, and no external approval is assumed.
+The engineering portion of Gate F is complete when committed canonical evidence references
+its exact clean source commit and both clean-clone runs pass. Submission readiness still
+requires sponsor eligibility and Marcelo's approval; neither is assumed.
 
 ## 17. Fixed Scope Boundary
 

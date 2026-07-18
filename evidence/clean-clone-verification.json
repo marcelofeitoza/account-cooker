@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-07-18T21:59:53Z",
+  "source_commit": "8cc338e968fb2ff561508ba2ca69d113e20035b9",
+  "command": "./scripts/full-demo.sh",
+  "canonical_run_count": 3,
+  "clean_clone_count": 2,
+  "runs": [
+    {
+      "name": "primary",
+      "run_id": "20260718T214608Z-96013",
+      "captured_at": "2026-07-18T21:48:29Z",
+      "preconditions": {
+        "git_clean": true,
+        "evidence_destination_absent": true
+      },
+      "result": "passed",
+      "source_git_dirty": false,
+      "manifest_sha256": "a73e4d57bc75047b586f7fd50124d5b38e2372617e31d58db092caced5a42983",
+      "checksums_sha256": "59fd2e88fdc54ba07c811a43a24a183d8015d2fd2d0263275d1d41316324ef13",
+      "virtual_soak_sha256": "5bc8f4522084d2c891830c1dd82a1794d5b7aeeddc3119eb12aab9f387b39ab8",
+      "surfpool_soak_sha256": "70006f68bd5dcbe46c647f8fb32c26f79cbe0ff1b33fcd311975d7010569d700",
+      "transactions_sha256": "8e44825cdb88d97a90be2f1766b94a9a593902ca2b0e27f967b79f484c2c1ef9"
+    },
+    {
+      "name": "clean_clone_1",
+      "run_id": "20260718T215028Z-490",
+      "captured_at": "2026-07-18T21:54:13Z",
+      "preconditions": {
+        "git_clean": true,
+        "surfpool_state_absent": true,
+        "evidence_destination_absent": true
+      },
+      "result": "passed",
+      "source_git_dirty": false,
+      "manifest_sha256": "81cd61d6e4164de919b1bd501158b58882974fe59ad875ce9a70af345e93d727",
+      "checksums_sha256": "dfaec2a974118eeebe661ba93b9d56c47e39adc4453a8132fac556cfcb6e8588",
+      "virtual_soak_sha256": "b8e6ee949f5f85ff93584b6611234ad40f5f638ebaebbc9a91f242629f62cbc1",
+      "surfpool_soak_sha256": "a313a38330bba157cbe0abab6f15d6028704b9b5b324dcdc0d9ba4ebd0c7265a",
+      "transactions_sha256": "f1061708b6105aed5106703d491193c201e07b2253aacc7ee22fc176064b5811"
+    },
+    {
+      "name": "clean_clone_2",
+      "run_id": "20260718T215536Z-13828",
+      "captured_at": "2026-07-18T21:59:16Z",
+      "preconditions": {
+        "git_clean": true,
+        "surfpool_state_absent": true,
+        "evidence_destination_absent": true
+      },
+      "result": "passed",
+      "source_git_dirty": false,
+      "manifest_sha256": "e3727d31f4981ee122804bd1b8d0e7a28d1d6d8c4935d43f8cf70235852a6d9d",
+      "checksums_sha256": "31a53abbbfd68700c7ac05280903962cc7e5a52fbb77513463e139ca72ba3bbc",
+      "virtual_soak_sha256": "20bf3b216e8adc9848862d15382b1dd1e092936a4aded971577d664eab232f39",
+      "surfpool_soak_sha256": "ebc03e4f6730b185f246fad2ca40cd40c02daeb4ff6ef4e019edd9e3d66c7c42",
+      "transactions_sha256": "a752943bc3ee17a97fdd9e47981829fd24cf523d1cf45ec85c44e2546e62ab17"
+    }
+  ],
+  "shared_deterministic_outputs": {
+    "metrics_json_sha256": "64c5ae0382586b976e039b719aa8ff47971a5b3daba624258a2e4ee5c6d391cc",
+    "metrics_csv_sha256": "71ef2a100c40ef9ea80dcf91fb5f88157aff59458449c33dc29224b4b08de85d",
+    "quality_gates_sha256": "1f3e721b0726bfb502056fb7d5593f37b62adf5f0aac5425d4c440128d5b6672",
+    "virtual_trace_blake3": {
+      "11": "5a2e67bb9d325e30ce088d0bf602f541edfb108bb3b7a4048c258e31210c4070",
+      "23": "ea4c4f8e092dec6e69f3713cf8178719732d388043d28a91ca22045c40c8e0e0",
+      "37": "74fc9eb5d8d1b6a0937c88bd3b70419bc5a4686c36845811d4ae129af08c68a3",
+      "51": "a955deaa2a321ab07bf5944d7a9b5581491b9e012ed767eb533cf8d4d6b40f27",
+      "71": "ceb3ed97a386cd787d4b1a37c9e7dc0a4f6f6d52bc7ddb23bb32e35d08e986b6"
+    }
+  },
+  "invariants": {
+    "all_runs_canonical": true,
+    "all_runs_source_clean": true,
+    "all_runs_31_commands_passed": true,
+    "all_runs_1000_transaction_soak_passed": true,
+    "all_runs_six_process_crash_checkpoints_passed": true,
+    "all_runs_started_fresh_primary_and_chain_state": true,
+    "all_runs_used_offline_loopback_surfpool": true,
+    "all_runs_left_canonical_rpc_port_closed": true,
+    "all_runs_checksum_verified": true,
+    "all_runs_post_pack_secret_scan_passed": true
+  },
+  "note": "Run-specific manifests differ because timestamps, PIDs, Surfnet IDs, local signatures, and measured wall time are intentionally fresh. Deterministic evaluator outputs and all five virtual trace hashes are identical."
+}

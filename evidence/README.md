@@ -4,8 +4,8 @@
 Git commit. Reduced rehearsals go to ignored `evidence/tmp` paths and cannot be promoted or
 used to claim the canonical scale gates.
 
-Status: no canonical `evidence/final` pack is present yet. The canonical run and both
-fresh-clone repetitions remain pending.
+Status: the canonical `evidence/final` pack and both fresh-clone repetitions passed on
+2026-07-18 from source commit `8cc338e968fb2ff561508ba2ca69d113e20035b9`.
 
 ## Generate
 
@@ -36,6 +36,8 @@ session provenance, or unsanitized signature samples.
   entry points. The executed configuration contains only loopback URLs and public policy
   values; signer paths and secrets are excluded.
 - `checksums.txt`: SHA-256 for every other file in the pack.
+- `../clean-clone-verification.json`: sanitized hashes and invariant results for the
+  primary canonical run and two independent clean-clone repetitions.
 
 Verify the pack from this directory with either platform command:
 

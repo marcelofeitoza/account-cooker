@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "mode": "canonical",
+  "captured_at": "2026-07-18T21:48:29Z",
+  "run_id": "20260718T214608Z-96013",
+  "started_at": "2026-07-18T21:46:08Z",
+  "finished_at": "2026-07-18T21:48:28Z",
+  "source": {
+    "git_commit": "8cc338e968fb2ff561508ba2ca69d113e20035b9",
+    "git_branch": "feat/measured-behavior-engine",
+    "git_dirty": false
+  },
+  "environment": {
+    "tools": {
+      "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)\nbinary: rustc\ncommit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234\ncommit-date: 2025-12-08\nhost: aarch64-apple-darwin\nrelease: 1.92.0\nLLVM version: 21.1.3",
+      "cargo": "cargo 1.92.0 (344c4567c 2025-10-21)",
+      "git": "git version 2.53.0",
+      "surfpool": "surfpool 1.4.0",
+      "solana": "solana-cli 3.1.8 (src:2717084a; feat:1620780344, client:Agave)",
+      "solana_keygen": "solana-keygen 3.1.8 (src:2717084a; feat:1620780344, client:Agave)",
+      "jq": "jq-1.8.1",
+      "shellcheck": "0.11.0",
+      "gitleaks": "8.30.1",
+      "cargo_audit": "cargo-audit-audit 0.22.1",
+      "cargo_deny": "cargo-deny 0.20.2"
+    },
+    "platform": "Darwin arm64",
+    "surfpool_version": "1.4.0",
+    "surfpool_binary_sha256": "11937d7655bc3a04dd90ae6e6038b9b9db59f2e0d48e1bed35b214fcae3dea24",
+    "snapshot_archive_sha256": "f1efd977ec801baec8856e594d215965414440a8a0158b7fcc607b1bb196f2b1",
+    "snapshot_sha256": "b2c428d69c90388c3dcdfa91f1789c82a6584544885eb6272b55cbb7094aeaab"
+  },
+  "reproducibility": {
+    "executed_command_records": 31,
+    "all_exit_statuses_zero": true,
+    "cargo_lock_sha256": "2c8c00675c666082610e4e3011663b2424980ce7e0e275426456f13afd78c606",
+    "surfpool_config_sha256": "a84f1097bca690b8aac5d87f27be2b48dea9753f814640cefeb455116dd1153a",
+    "behavior_model_sha256": "68fc434ecca1e1a00de8412a782dbf60d09ca8f762510c5697ecbc234e72d61e",
+    "persona_model_sha256": "6558f597a7c320b933877a0eb2a9992837b70f182217bfce5edab78579b18180",
+    "scheduler_sha256": "377e0d54dbab11013edd7cab6af424058c35f0197bddc8ae7c5b2ffabbab4616",
+    "jupiter_quote_sha256": "d05c54f58da2b6d1d8cfe84fb3d023434890e467c567c49d974079a9b96a00d2",
+    "jupiter_instructions_sha256": "d0b56b02b7285ed44a6c00951c425388c1cc293541bf1c6d385b4fa1f62f6b9d",
+    "executed_config_sha256": "ea6ce0444ce7d88a81fccc7f45e2f65c9315bcf244ce0292d0b68e5f69d14250",
+    "raw_chain_log_sha256": "ecc31ce9be815dddd8d395a34c934ce1f5a956a720df8080320206b1cc6ffb85"
+  },
+  "gates": {
+    "quality": true,
+    "cli_workflow": true,
+    "native_transfer": true,
+    "spl_transfer": true,
+    "jupiter_swap": true,
+    "native_stake_lifecycle": true,
+    "fault_reconciliation": true,
+    "real_process_crash_recovery": true,
+    "virtual_soak": true,
+    "surfpool_soak": true,
+    "evaluation": true
+  },
+  "totals": {
+    "demo_funding_transactions": 16,
+    "demo_runtime_transactions": 32,
+    "demo_confirmation_reaudits": 32,
+    "chain_acceptance_scenarios": 6,
+    "process_crash_checkpoints": 6,
+    "soak_transactions": 1000,
+    "evaluation_seed_rows": 90,
+    "executed_command_records": 31
+  },
+  "safety": {
+    "rpc_scope": "explicit-loopback-surfpool-only",
+    "public_chain_rpc_reads": 0,
+    "public_network_writes": 0,
+    "signer_files_committed": false,
+    "raw_logs_committed": false,
+    "primary_started_from_fresh_database": true,
+    "primary_restart_proved_persistence": true,
+    "chain_started_from_independent_fresh_database": true,
+    "recovery_transaction_submissions": 0,
+    "unresolved_runtime_actions": 0,
+    "soak_duplicate_signatures": 0,
+    "soak_budget_violations": 0,
+    "post_pack_secret_scan": true,
+    "checksum_self_verification": true
+  },
+  "limitations": [
+    "The common-funder graph remains directly observable; lower behavioral linkage scores do not establish transaction-graph anonymity.",
+    "The evaluator uses synthetic labeled attacker scenarios; measured scores do not establish anonymity or mainnet behavior.",
+    "Jupiter evidence replays a reviewed pinned Raydium CLMM state snapshot and does not claim current market execution quality.",
+    "Surfpool is a local offline-snapshot topology and does not reproduce public-network latency, validator competition, or topology.",
+    "Stake acceptance uses the native Solana stake lifecycle; Marinade is not implemented or claimed."
+  ]
+}

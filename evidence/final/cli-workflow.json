@@ -1,0 +1,328 @@
+{
+  "schema_version": 1,
+  "doctor": {
+    "healthy": true,
+    "surfnet_id": "noise-full-demo-20260718T214608Z-96013",
+    "surfpool_version": "1.4.0",
+    "solana_core": "4.0.0",
+    "feature_set": 3718597879,
+    "block_height": 2,
+    "epoch": 0,
+    "absolute_slot": 33,
+    "recent_local_signatures": 1,
+    "signer_loaded": false,
+    "state_changed": false
+  },
+  "funding": {
+    "preview": {
+      "mode": "preview",
+      "fleet_agents": 16,
+      "lamports_per_agent": 600000000,
+      "network_preflight": false,
+      "signer_loaded": false,
+      "state_changed": false
+    },
+    "execute": {
+      "mode": "execute",
+      "fleet_agents": 16,
+      "lamports_per_agent": 600000000,
+      "actions_inserted": 16,
+      "claimed_actions": 16,
+      "recovery_claimed": 0,
+      "workers": {
+        "confirmed": 16,
+        "audited": 0,
+        "orphaned": 0,
+        "rejected": 0,
+        "delayed": 0,
+        "unknown": 0,
+        "expired": 0,
+        "failed": 0,
+        "errors": [],
+        "peak_workers": 1,
+        "released_without_start": 0
+      },
+      "network_preflight": true,
+      "signer_loaded": true,
+      "stop_reason": null,
+      "state_changed": true
+    },
+    "idempotent_replay": {
+      "mode": "execute",
+      "actions_inserted": 0,
+      "claimed_actions": 0,
+      "recovery_claimed": 0,
+      "workers": {
+        "confirmed": 0,
+        "audited": 0,
+        "orphaned": 0,
+        "rejected": 0,
+        "delayed": 0,
+        "unknown": 0,
+        "expired": 0,
+        "failed": 0,
+        "errors": [],
+        "peak_workers": 0,
+        "released_without_start": 0
+      },
+      "network_preflight": true,
+      "signer_loaded": true,
+      "stop_reason": null,
+      "state_changed": false
+    }
+  },
+  "runtime": {
+    "status_before": {
+      "store_schema_version": 6,
+      "journal_mode": "wal",
+      "integrity": "ok",
+      "snapshot": {
+        "database_id": "d6060455-ad73-4b2a-975b-f5a7c10c9538",
+        "identity": {
+          "network": "surfpool",
+          "surfnet_id": "noise-full-demo-20260718T214608Z-96013"
+        },
+        "observed_at": "2026-07-18T21:46:58.864248Z",
+        "total_agents": 16,
+        "total_actions": 0,
+        "actions_by_state": {
+          "planned": 0,
+          "simulated": 0,
+          "submitted": 0,
+          "confirmed": 0,
+          "rejected": 0,
+          "failed": 0,
+          "expired": 0,
+          "unknown": 0,
+          "orphaned": 0,
+          "cancelled": 0
+        },
+        "active_leases": 0,
+        "expired_leases": 0,
+        "due_agents": 16,
+        "due_actions": 0,
+        "unresolved_actions": 0,
+        "due_confirmation_audits": null
+      },
+      "network_requests": 0,
+      "signer_loaded": false,
+      "state_changed": false
+    },
+    "preview": {
+      "mode": "preview",
+      "agents": 16,
+      "enabled_actions": [
+        "native_transfer"
+      ],
+      "planning_limit": 5000,
+      "action_limit": 32,
+      "claimed_actions": 0,
+      "workers": {
+        "confirmed": 0,
+        "audited": 0,
+        "orphaned": 0,
+        "rejected": 0,
+        "delayed": 0,
+        "unknown": 0,
+        "expired": 0,
+        "failed": 0,
+        "errors": [],
+        "peak_workers": 0,
+        "released_without_start": 0
+      },
+      "network_preflight": false,
+      "signer_loaded": false,
+      "state_changed": false
+    },
+    "execute": {
+      "mode": "execute",
+      "run_id": "e63fb536-dffa-59d2-a84b-ac3822a8500b",
+      "agents": 16,
+      "enabled_actions": [
+        "native_transfer"
+      ],
+      "planning_limit": 5000,
+      "action_limit": 32,
+      "planning": {
+        "decisions": 5000,
+        "actions_enqueued": 1064,
+        "actions_replayed": 0,
+        "idle_decisions": 3936,
+        "conflicts": 0
+      },
+      "claimed_actions": 32,
+      "workers": {
+        "confirmed": 32,
+        "audited": 0,
+        "orphaned": 0,
+        "rejected": 0,
+        "delayed": 0,
+        "unknown": 0,
+        "expired": 0,
+        "failed": 0,
+        "errors": [],
+        "peak_workers": 32,
+        "released_without_start": 0
+      },
+      "before": {
+        "database_id": "d6060455-ad73-4b2a-975b-f5a7c10c9538",
+        "identity": {
+          "network": "surfpool",
+          "surfnet_id": "noise-full-demo-20260718T214608Z-96013"
+        },
+        "observed_at": "2026-07-18T21:46:58.917137Z",
+        "total_agents": 16,
+        "total_actions": 0,
+        "actions_by_state": {
+          "planned": 0,
+          "simulated": 0,
+          "submitted": 0,
+          "confirmed": 0,
+          "rejected": 0,
+          "failed": 0,
+          "expired": 0,
+          "unknown": 0,
+          "orphaned": 0,
+          "cancelled": 0
+        },
+        "active_leases": 0,
+        "expired_leases": 0,
+        "due_agents": 16,
+        "due_actions": 0,
+        "unresolved_actions": 0,
+        "due_confirmation_audits": null
+      },
+      "after": {
+        "database_id": "d6060455-ad73-4b2a-975b-f5a7c10c9538",
+        "identity": {
+          "network": "surfpool",
+          "surfnet_id": "noise-full-demo-20260718T214608Z-96013"
+        },
+        "observed_at": "2026-07-18T21:47:01.525210Z",
+        "total_agents": 16,
+        "total_actions": 1064,
+        "actions_by_state": {
+          "planned": 1032,
+          "simulated": 0,
+          "submitted": 0,
+          "confirmed": 32,
+          "rejected": 0,
+          "failed": 0,
+          "expired": 0,
+          "unknown": 0,
+          "orphaned": 0,
+          "cancelled": 0
+        },
+        "active_leases": 0,
+        "expired_leases": 0,
+        "due_agents": 16,
+        "due_actions": 1032,
+        "unresolved_actions": 0,
+        "due_confirmation_audits": null
+      },
+      "network_preflight": true,
+      "signer_loaded": true,
+      "stop_reason": null,
+      "state_changed": true
+    },
+    "status_after": {
+      "store_schema_version": 6,
+      "journal_mode": "wal",
+      "integrity": "ok",
+      "snapshot": {
+        "database_id": "d6060455-ad73-4b2a-975b-f5a7c10c9538",
+        "identity": {
+          "network": "surfpool",
+          "surfnet_id": "noise-full-demo-20260718T214608Z-96013"
+        },
+        "observed_at": "2026-07-18T21:47:03.667821Z",
+        "total_agents": 16,
+        "total_actions": 1064,
+        "actions_by_state": {
+          "planned": 1032,
+          "simulated": 0,
+          "submitted": 0,
+          "confirmed": 32,
+          "rejected": 0,
+          "failed": 0,
+          "expired": 0,
+          "unknown": 0,
+          "orphaned": 0,
+          "cancelled": 0
+        },
+        "active_leases": 0,
+        "expired_leases": 0,
+        "due_agents": 16,
+        "due_actions": 1032,
+        "unresolved_actions": 0,
+        "due_confirmation_audits": null
+      },
+      "network_requests": 0,
+      "signer_loaded": false,
+      "state_changed": false
+    }
+  },
+  "recovery": {
+    "preview": {
+      "mode": "preview",
+      "limit": 32,
+      "counts_before": {
+        "expired_leases": 0,
+        "reconciliation_candidates": 0,
+        "confirmation_audit_candidates": 32
+      },
+      "transaction_submissions": 0,
+      "network_preflight": false,
+      "signer_loaded": false,
+      "state_changed": false
+    },
+    "execute": {
+      "mode": "execute",
+      "limit": 32,
+      "released_expired_leases": 0,
+      "reconciliation_claimed": 0,
+      "audit_claimed": 32,
+      "reconciliation": {
+        "confirmed": 0,
+        "audited": 0,
+        "orphaned": 0,
+        "rejected": 0,
+        "delayed": 0,
+        "unknown": 0,
+        "expired": 0,
+        "failed": 0,
+        "errors": [],
+        "peak_workers": 0,
+        "released_without_start": 0
+      },
+      "audits": {
+        "confirmed": 0,
+        "audited": 32,
+        "orphaned": 0,
+        "rejected": 0,
+        "delayed": 0,
+        "unknown": 0,
+        "expired": 0,
+        "failed": 0,
+        "errors": [],
+        "peak_workers": 32,
+        "released_without_start": 0
+      },
+      "counts_before": {
+        "expired_leases": 0,
+        "reconciliation_candidates": 0,
+        "confirmation_audit_candidates": 32
+      },
+      "counts_after": {
+        "expired_leases": 0,
+        "reconciliation_candidates": 0,
+        "confirmation_audit_candidates": 0
+      },
+      "transaction_submissions": 0,
+      "network_preflight": true,
+      "signer_loaded": true,
+      "stop_reason": null,
+      "state_changed": true
+    }
+  }
+}

@@ -1,0 +1,62 @@
+# Account Cooker is offline-first. Chain commands remain restricted to the
+# loopback Surfpool endpoint below when they are enabled.
+
+[core]
+enabled_actions = ["native_transfer", "spl_transfer", "jupiter_swap"]
+seed_hex = "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"
+
+[core.network]
+rpc_url = "http://127.0.0.1:18899"
+surfnet_id = "noise-full-demo-20260718T214608Z-96013"
+
+[core.runtime]
+max_concurrency = 64
+lease_seconds = 45
+kill_switch = false
+
+[core.budgets]
+daily_lamports = 500000000
+lifetime_lamports = 15000000000
+reserve_lamports = 50000000
+max_fee_lamports = 10000
+max_account_creation_lamports = 10000000
+
+# Real runtime commands use this separate allowlist. The default demo fleet executes native
+# transfers; SPL, Jupiter, and stake require explicit protocol-specific online configuration.
+[online]
+enabled_actions = ["native_transfer"]
+confirmation_timeout_seconds = 30
+confirmation_audit_age_seconds = 300
+funding_lamports_per_agent = 600000000
+kill_switch_file = ".surfpool/KILL_SWITCH"
+
+[offline]
+start = "2026-01-01T00:00:00Z"
+simulation_agents = 1000
+simulation_days = 30
+max_decisions_per_agent_day = 500
+max_slippage_bps = 100
+personas = ["casual", "trader", "saver", "explorer"]
+# These are stable simulation identifiers, not keys used for execution.
+native_destinations = ["simulation-destination-00", "simulation-destination-01"]
+allow_stake_enter = false
+
+[[offline.spl_routes]]
+mint = "simulation-mint-c"
+destination_owner = "simulation-destination-00"
+
+[[offline.swap_routes]]
+input_mint = "So11111111111111111111111111111111111111112"
+output_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+[[offline.swap_routes]]
+input_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+output_mint = "So11111111111111111111111111111111111111112"
+
+[evaluation]
+controllers = 10
+agents_per_controller = 10
+days = 30
+events_per_agent_per_day = 2
+seeds = [11, 23, 37, 51, 71]
+threshold = 0.55

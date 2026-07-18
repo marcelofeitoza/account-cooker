@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "run_id": "20260718T214608Z-96013",
+  "mode": "canonical",
+  "started_at": "2026-07-18T21:46:08Z",
+  "finished_at": "2026-07-18T21:48:28Z",
+  "source": {
+    "git_commit": "8cc338e968fb2ff561508ba2ca69d113e20035b9",
+    "git_branch": "feat/measured-behavior-engine",
+    "git_dirty": false
+  },
+  "invocation": {
+    "program": "scripts/full-demo.sh",
+    "arguments": []
+  },
+  "command_count": 31,
+  "tools": {
+    "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)\nbinary: rustc\ncommit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234\ncommit-date: 2025-12-08\nhost: aarch64-apple-darwin\nrelease: 1.92.0\nLLVM version: 21.1.3",
+    "cargo": "cargo 1.92.0 (344c4567c 2025-10-21)",
+    "git": "git version 2.53.0",
+    "surfpool": "surfpool 1.4.0",
+    "solana": "solana-cli 3.1.8 (src:2717084a; feat:1620780344, client:Agave)",
+    "solana_keygen": "solana-keygen 3.1.8 (src:2717084a; feat:1620780344, client:Agave)",
+    "jq": "jq-1.8.1",
+    "shellcheck": "0.11.0",
+    "gitleaks": "8.30.1",
+    "cargo_audit": "cargo-audit-audit 0.22.1",
+    "cargo_deny": "cargo-deny 0.20.2"
+  },
+  "public_chain_rpc_reads": 0,
+  "public_network_writes": 0
+}

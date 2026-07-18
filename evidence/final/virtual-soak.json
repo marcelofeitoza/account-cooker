@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "mode": "canonical",
+  "offline_only": true,
+  "signer_loaded": false,
+  "network_requests": 0,
+  "trace_hash_algorithm": "blake3",
+  "scheduler": "stable_bounded",
+  "start": "2026-01-01T00:00:00+00:00",
+  "model_version": "behavior-v1",
+  "agents": 1000,
+  "days": 30,
+  "max_concurrency": 64,
+  "max_decisions_per_agent_day": 500,
+  "daily_budget": 500000000,
+  "seeds": [
+    11,
+    23,
+    37,
+    51,
+    71
+  ],
+  "completed_seeds": 5,
+  "total_wall_time_ms": 7331,
+  "per_seed": [
+    {
+      "seed": 11,
+      "seed_hex": "1cad821ac93ed35dd084d27dd92a4e8a9b7d40197abbfc1098fccb20ee56ad12",
+      "run_id": "5a3b4a5c-3719-5ace-b3b5-ee3d3540a456",
+      "decisions": 363480,
+      "observable_events": 102443,
+      "trace_bytes": 40948771,
+      "trace_blake3": "5a2e67bb9d325e30ce088d0bf602f541edfb108bb3b7a4048c258e31210c4070",
+      "trace_file": "traces/seed-11.jsonl",
+      "wall_time_ms": 878,
+      "replay_wall_time_ms": 590,
+      "proofs": {
+        "deterministic_replay": true,
+        "chronological_events": true,
+        "label_free_events": true,
+        "bounded_scheduler_workers": true,
+        "daily_budget_respected": true,
+        "completed_without_panic": true
+      }
+    },
+    {
+      "seed": 23,
+      "seed_hex": "c8358c5c9ec3f8f13e832d6dd80abc25676ca3b6e292119ad2373d81c4468a6f",
+      "run_id": "6305742a-729d-5060-aa1c-275f3aeec8a7",
+      "decisions": 363061,
+      "observable_events": 102268,
+      "trace_bytes": 40873284,
+      "trace_blake3": "ea4c4f8e092dec6e69f3713cf8178719732d388043d28a91ca22045c40c8e0e0",
+      "trace_file": "traces/seed-23.jsonl",
+      "wall_time_ms": 860,
+      "replay_wall_time_ms": 589,
+      "proofs": {
+        "deterministic_replay": true,
+        "chronological_events": true,
+        "label_free_events": true,
+        "bounded_scheduler_workers": true,
+        "daily_budget_respected": true,
+        "completed_without_panic": true
+      }
+    },
+    {
+      "seed": 37,
+      "seed_hex": "ca858427be81dd744fb41ca347b840f3001e53daf8029d7c2db8b0e34ffd7727",
+      "run_id": "1a2e970c-e1b6-51fb-8fef-39cba0dee93e",
+      "decisions": 364635,
+      "observable_events": 102622,
+      "trace_bytes": 41019386,
+      "trace_blake3": "74fc9eb5d8d1b6a0937c88bd3b70419bc5a4686c36845811d4ae129af08c68a3",
+      "trace_file": "traces/seed-37.jsonl",
+      "wall_time_ms": 861,
+      "replay_wall_time_ms": 590,
+      "proofs": {
+        "deterministic_replay": true,
+        "chronological_events": true,
+        "label_free_events": true,
+        "bounded_scheduler_workers": true,
+        "daily_budget_respected": true,
+        "completed_without_panic": true
+      }
+    },
+    {
+      "seed": 51,
+      "seed_hex": "52975de574fbca7c20ff52a683e08875762e72ecdee681aaac1ab226057ae6be",
+      "run_id": "48f2d80b-4253-5462-be17-e41699e495c3",
+      "decisions": 363914,
+      "observable_events": 102497,
+      "trace_bytes": 40974237,
+      "trace_blake3": "a955deaa2a321ab07bf5944d7a9b5581491b9e012ed767eb533cf8d4d6b40f27",
+      "trace_file": "traces/seed-51.jsonl",
+      "wall_time_ms": 883,
+      "replay_wall_time_ms": 587,
+      "proofs": {
+        "deterministic_replay": true,
+        "chronological_events": true,
+        "label_free_events": true,
+        "bounded_scheduler_workers": true,
+        "daily_budget_respected": true,
+        "completed_without_panic": true
+      }
+    },
+    {
+      "seed": 71,
+      "seed_hex": "4eca1e783e115b43d75a79627cfdd3852385085e6ff751365250aff392b78f93",
+      "run_id": "1f5d2666-3671-57f2-a5c4-1046e4f92616",
+      "decisions": 363264,
+      "observable_events": 102260,
+      "trace_bytes": 40873246,
+      "trace_blake3": "ceb3ed97a386cd787d4b1a37c9e7dc0a4f6f6d52bc7ddb23bb32e35d08e986b6",
+      "trace_file": "traces/seed-71.jsonl",
+      "wall_time_ms": 875,
+      "replay_wall_time_ms": 590,
+      "proofs": {
+        "deterministic_replay": true,
+        "chronological_events": true,
+        "label_free_events": true,
+        "bounded_scheduler_workers": true,
+        "daily_budget_respected": true,
+        "completed_without_panic": true
+      }
+    }
+  ],
+  "aggregate": {
+    "decisions": {
+      "min": 363061,
+      "mean": 363670.8,
+      "max": 364635
+    },
+    "observable_events": {
+      "min": 102260,
+      "mean": 102418.0,
+      "max": 102622
+    },
+    "trace_bytes": {
+      "min": 40873246,
+      "mean": 40937784.8,
+      "max": 41019386
+    },
+    "wall_time_ms": {
+      "min": 860,
+      "mean": 871.4,
+      "max": 883
+    },
+    "replay_wall_time_ms": {
+      "min": 587,
+      "mean": 589.2,
+      "max": 590
+    }
+  },
+  "proofs": {
+    "deterministic_replay": true,
+    "chronological_events": true,
+    "label_free_events": true,
+    "bounded_scheduler_workers": true,
+    "daily_budget_respected": true,
+    "completed_without_panic": true
+  },
+  "environment": {
+    "captured_at": "2026-07-18T21:47:13Z",
+    "platform": "Darwin arm64",
+    "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)\nbinary: rustc\ncommit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234\ncommit-date: 2025-12-08\nhost: aarch64-apple-darwin\nrelease: 1.92.0\nLLVM version: 21.1.3",
+    "cargo": "cargo 1.92.0 (344c4567c 2025-10-21)",
+    "git": {
+      "commit": "8cc338e968fb2ff561508ba2ca69d113e20035b9",
+      "branch": "feat/measured-behavior-engine",
+      "dirty": false
+    },
+    "build_profile": "release",
+    "cargo_network": "offline",
+    "time_implementation": "/usr/bin/time bsd",
+    "peak_rss_bytes": 221462528,
+    "command": "<project>/target/release/cooker soak --config <project>/evidence/raw/full-demo/20260718T214608Z-96013/config/cooker.toml --output-dir <project>/evidence/raw/full-demo/20260718T214608Z-96013/virtual-soak --seeds 11\\,23\\,37\\,51\\,71 --agents 1000 --days 30 --force ",
+    "config": "<project>/evidence/raw/full-demo/20260718T214608Z-96013/config/cooker.toml"
+  }
+}

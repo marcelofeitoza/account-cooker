@@ -1,0 +1,2 @@
+scripts/full-demo.sh
+Exact executed argv, timestamps, exit statuses, and log digests are in executions.json.

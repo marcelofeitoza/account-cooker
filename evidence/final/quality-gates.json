@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "formatting": true,
+  "clippy": true,
+  "workspace_tests": true,
+  "documentation_tests": true,
+  "shell_syntax": true,
+  "shellcheck": true,
+  "git_whitespace": true,
+  "cargo_audit": true,
+  "cargo_deny": true,
+  "working_tree_secret_scan": true,
+  "git_history_secret_scan": true,
+  "release_build": true,
+  "all_passed": true
+}

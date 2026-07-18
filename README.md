@@ -6,11 +6,10 @@ wallet-clustering attacks. It treats privacy as an empirical systems problem: th
 must survive faults without duplicate execution, and the evaluator must report failed
 privacy hypotheses as plainly as successful ones.
 
-> Status: the implementation and executable release gates are present. No canonical
-> evidence pack has been produced yet; the clean-tree canonical run and two fresh-clone
-> verification runs remain release gates. The upstream pull request remains a draft, and
-> sponsor confirmation that a human may submit AI-assisted work under `HUMAN_ONLY` is still
-> required before submission.
+> Status: implementation, canonical evidence, and two independent clean-clone release
+> verifications are complete. The upstream pull request remains a draft, and sponsor
+> confirmation that a human may submit AI-assisted work under `HUMAN_ONLY` is still required
+> before submission.
 
 ## What Ships
 
