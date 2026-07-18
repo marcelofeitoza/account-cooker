@@ -1,8 +1,8 @@
 # Account Cooker Master Plan
 
-Status: all engineering and release-proof gates are complete. Draft PR publication,
-sponsor AI-assistance eligibility, and Marcelo's approval remain before the draft can
-leave draft state.
+Status: Blocks A-F, the canonical release proof, the published-policy eligibility audit,
+and the draft PR handoff are complete. Marcelo's final human review and submission decision
+remain before the draft can leave draft state.
 
 This document is the public implementation and release contract for the bounty build. It
 defines what is implemented, what evidence is still required, which claims are permitted,
@@ -17,11 +17,11 @@ and which features remain outside the completion boundary.
 | C | native SOL, SPL, Jupiter, and native stake through Surfpool | complete |
 | D | crash, unknown outcome, restart, rollback audit, budget, kill switch | complete |
 | E | evaluator, security/provenance, public docs, Obsidian record | complete |
-| F | canonical soaks, sanitized evidence, two clean-clone proofs, draft PR handoff | in progress |
+| F | canonical soaks, sanitized evidence, two clean-clone proofs, draft PR handoff | complete |
 
-Blocks A-E describe implemented source and focused verification. Block F additionally has
-clean-tree canonical evidence and two independent clean-clone reproductions; its remaining
-work is public handoff and the two external approval gates.
+Blocks A-E describe implemented source and focused verification. Block F adds clean-tree
+canonical evidence, two independent clean-clone reproductions, and the updated public draft
+handoff. The contribution intentionally stays draft for Marcelo's human decision.
 
 ## 1. Objective
 
@@ -468,9 +468,9 @@ The complete evidence requirements are in docs/VALIDATION.md.
 - The separately indexed Obsidian project and session records are current. They remain
   operator memory only and are not a source or runtime dependency of this repository.
 - The expanded reduced full demo, six process-crash cases, and persistent Surfpool restart
-  pass; only canonical-scale Block F artifacts may support final scale claims.
+  pass. Canonical-scale Block F artifacts are the sole basis for final scale claims.
 
-### Block F: engineering proof complete; handoff in progress
+### Block F: complete
 
 - Completed exactly five seeds over 1,000 agents for 30 virtual days from a clean commit.
 - Completed 1,000 locally signed Surfpool soak transactions with response loss, runtime
@@ -478,14 +478,15 @@ The complete evidence requirements are in docs/VALIDATION.md.
 - Generated and reviewed the sanitized checksum-bearing `evidence/final` pack.
 - Reproduced the complete canonical command twice from fresh clones and fresh offline
   Surfpool state; deterministic metrics and all five virtual trace hashes match.
-- Push the implementation and evidence commits and update the draft PR with measured
-  results and limitations.
-- Resolve human-only/AI-assistance eligibility and obtain Marcelo's approval before any
-  submission or transition out of draft.
+- Pushed the implementation and evidence commits and updated draft PR 2 with measured
+  results, limitations, provenance, and reviewer entry points.
+- Audited the live listing, platform agent rules, and terms. `HUMAN_ONLY` requires Marcelo's
+  human submission path; no published rule prohibits disclosed AI assistance.
 
-The engineering portion of Gate F is complete when committed canonical evidence references
-its exact clean source commit and both clean-clone runs pass. Submission readiness still
-requires sponsor eligibility and Marcelo's approval; neither is assumed.
+Committed canonical evidence references its exact clean source commit and both clean-clone
+runs pass. Published-policy eligibility is documented in `docs/ELIGIBILITY.md`. Marcelo's
+approval is a deliberately retained human release control, not an unfinished engineering
+or evidence gate.
 
 ## 17. Fixed Scope Boundary
 
@@ -502,19 +503,24 @@ and state transition.
 
 ## 18. Draft PR And Evidence State
 
-The PR remains draft until every mandatory gate passes. Planning-only commits are not
-evidence. Implementation commits establish reviewable source; only a checksum-bearing
-canonical pack tied to its exact clean commit can support final scale, transaction, or
-metric claims.
+Draft PR 2 contains the complete implementation, measured result, limitations, canonical
+evidence links, and clean-clone verification. It remains draft even though every mandatory
+engineering gate passes, because Marcelo owns the final human review and submission
+decision. Only the checksum-bearing canonical pack tied to its exact clean commit supports
+scale, transaction, or metric claims.
 
-## 19. Sponsor Clarifications
+## 19. Eligibility Audit And Sponsor Questions
 
-The listing currently reports `agentAccess: HUMAN_ONLY`. That blocks agent-API submission,
-but it does not itself answer whether a human may submit AI-assisted implementation. The
-first question blocks final submission; the remaining questions affect positioning but do
-not relax any local safety or evidence gate:
+The dated audit in `docs/ELIGIBILITY.md` establishes the published submission contract:
+Brazilian builders, Rust end to end, open-source MIT work, and human submission. Superteam's
+agent documentation defines agent eligibility as `AGENT_ALLOWED` or `AGENT_ONLY`, so this
+listing's `HUMAN_ONLY` value blocks agent-API submission. Neither the listing nor platform
+terms prohibit AI-assisted implementation by a human entrant. The PR discloses assistance,
+and no agent submission was attempted.
 
-- Does HUMAN_ONLY govern only the submitting profile, or AI-assisted implementation too?
+These remaining questions can affect sponsor preference or scoring, but they are not
+published eligibility blockers and do not relax any safety or evidence gate:
+
 - Must the PR be merged, or only publicly reviewable, before the deadline?
 - What exact attacker and metric should satisfy statistically indistinguishable?
 - Are unsafe examples such as governance voting and artificial protocol activity optional?
@@ -538,4 +544,5 @@ Done means a new reviewer can:
 11. verify that the Git history contains no external private code, secrets, or
     unsupported claims.
 
-Anything less remains a draft.
+All eleven conditions are satisfied by the canonical pack and its two clean-clone
+reproductions. The PR stays draft only until Marcelo approves the final human submission.

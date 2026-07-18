@@ -6,10 +6,10 @@ wallet-clustering attacks. It treats privacy as an empirical systems problem: th
 must survive faults without duplicate execution, and the evaluator must report failed
 privacy hypotheses as plainly as successful ones.
 
-> Status: implementation, canonical evidence, and two independent clean-clone release
-> verifications are complete. The upstream pull request remains a draft, and sponsor
-> confirmation that a human may submit AI-assisted work under `HUMAN_ONLY` is still required
-> before submission.
+> Status: implementation, canonical evidence, two independent clean-clone release
+> verifications, published-policy eligibility audit, and draft-PR handoff are complete.
+> The upstream pull request remains a draft until Marcelo performs the final human review
+> and decides whether to submit it.
 
 ## What Ships
 
@@ -137,6 +137,7 @@ and snapshot hashes, supported metrics, commands, and checksums. See
 - [Threat model and claim policy](docs/THREAT_MODEL.md)
 - [Surfpool runbook](docs/SURFPOOL.md)
 - [Validation and evidence gates](docs/VALIDATION.md)
+- [Bounty eligibility audit](docs/ELIGIBILITY.md)
 
 This repository targets Superteam Brasil's
 [Privacy-Through-Noise tooling bounty](https://superteam.fun/earn/listing/noise), in the

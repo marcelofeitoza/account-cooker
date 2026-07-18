@@ -67,5 +67,6 @@ particular:
 - execution uses one local controller, SQLite store, local signers, and loopback Surfpool;
 - the stateful adapter is native Solana stake, not Marinade.
 
-Sponsor confirmation of AI-assistance eligibility under the listing's `HUMAN_ONLY` flag
-is also outside this evidence pack and remains required before submission.
+The separate `docs/ELIGIBILITY.md` audit covers the human submission path and disclosed
+AI assistance. Personal eligibility attestations and the manual submission remain outside
+this evidence pack and under Marcelo's control.

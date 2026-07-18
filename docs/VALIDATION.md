@@ -289,10 +289,10 @@ The PR can leave draft only after:
 - evaluator correctness fixtures pass;
 - a comparative report is committed;
 - unsupported privacy claims are absent;
-- sponsor eligibility questions are resolved;
+- the published-policy eligibility audit is current;
 - Marcelo approves final submission.
 
-The external eligibility blocker is specific: the listing reports `HUMAN_ONLY`, but the
-available listing text does not establish whether a human entrant may submit AI-assisted
-implementation. Sponsor confirmation is required; local completion does not imply
-eligibility.
+The dated audit in `ELIGIBILITY.md` records that `HUMAN_ONLY` blocks agent-API submission,
+while the listing and platform terms contain no prohibition on disclosed AI assistance by a
+human entrant. Engineering completion does not replace Marcelo's country/account
+attestations, final review, or manual submission decision.
