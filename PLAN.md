@@ -1,10 +1,26 @@
 # Account Cooker Master Plan
 
-Status: ready for implementation after plan review.
+Status: implementation complete; canonical evidence and clean-clone release verification
+remain before the draft is ready for Marcelo's review.
 
-This document is the public implementation contract for a one-session build. It
+This document is the public implementation and release contract for the bounty build. It
 defines what will be built, what evidence is required, which claims are permitted,
 and which features are cut before correctness, Surfpool verification, or safety.
+
+## Completion State
+
+| Block | Scope | State |
+|---|---|---|
+| A | pinned workspace, CI, configuration, CLI, Surfpool harness | complete |
+| B | personas, scheduler, SQLite durability, policy, concurrency, properties | complete |
+| C | native SOL, SPL, Jupiter, and native stake through Surfpool | complete |
+| D | crash, unknown outcome, restart, rollback audit, budget, kill switch | complete |
+| E | evaluator, security/provenance, public docs, Obsidian record | in progress |
+| F | canonical soaks, sanitized evidence, two clean-clone proofs, draft PR handoff | pending |
+
+"Complete" here means implemented and exercised by the reduced full-demo rehearsal. Block
+F is deliberately separate: only its clean-tree canonical artifacts may support the final
+reported scale and transaction counts.
 
 ## 1. Objective
 
@@ -21,7 +37,7 @@ distinguishable. The system reports failed privacy hypotheses rather than hiding
 
 ## 2. Operating Contract
 
-The following decisions are fixed for the first implementation:
+The following decisions are fixed for the complete deliverable:
 
 - Language: Rust end to end.
 - License: MIT.
@@ -40,15 +56,14 @@ recovery path, and executable soak must also pass through Surfpool.
 
 ## 3. Definition Of Success
 
-The one-session build is complete only when all P0 gates are green:
+The bounty build is complete only when every mandatory gate is green:
 
 - A clean checkout builds with the pinned Rust toolchain.
 - Format, Clippy with warnings denied, unit tests, and property tests pass.
 - The CLI can create a deterministic fleet, plan actions, run them on Surfpool,
   stop, restart, reconcile, and continue without double execution.
 - Native transfer, SPL transfer, and Jupiter swap complete on Surfpool.
-- One stateful protocol lifecycle completes on Surfpool. Marinade is first choice;
-  native stake is the bounded fallback if the external Marinade interface blocks.
+- A native stake create/delegate/deactivate/withdraw lifecycle completes on Surfpool.
 - A 1,000-agent, 30-virtual-day simulation produces a deterministic trace.
 - A compressed wall-clock Surfpool soak executes a bounded subset of that trace.
 - The evaluator compares naive and modeled behavior over at least five seeds.
@@ -58,7 +73,7 @@ The one-session build is complete only when all P0 gates are green:
 
 ## 4. Scope
 
-### P0: prize-complete one-session build
+### Required complete bounty deliverable
 
 - Rust workspace, configuration schema, error taxonomy, and structured logging.
 - Deterministic persona/session generator and priority-queue scheduler.
@@ -72,7 +87,9 @@ The one-session build is complete only when all P0 gates are green:
 - Unit, property, integration, recovery, and soak tests.
 - Architecture, threat model, Surfpool runbook, validation report, and full demo.
 
-### P1: same-session stretch, only after every P0 gate
+### Explicitly deferred extensions
+
+These are possible follow-on projects, not completion gates and not implied capabilities:
 
 - A second stateful protocol adapter, preferably Orca LP or Marinade unstake.
 - Prometheus endpoint and a compact terminal status view.
@@ -104,9 +121,9 @@ The one-session build is complete only when all P0 gates are green:
 | evidence pack | reproducibility and claim basis | manifest contains versions and hashes |
 | documentation | architecture, threat model, limitations | matches implemented behavior |
 
-## 6. Planned Crate Graph
+## 6. Crate Graph
 
-The initial workspace has six crates:
+The workspace has six crates:
 
 1. **cooker-core**
    - AgentId, ActionId, Persona, SessionState, PlannedAction, ActionOutcome.
@@ -230,7 +247,7 @@ Each agent has immutable identity parameters:
 
 ### Semi-Markov session states
 
-The P0 model uses:
+The behavior model uses:
 
 - Dormant
 - Active
@@ -277,30 +294,29 @@ are sampled separately from transitions so the engine does not become a memoryle
    - Simulate before submit.
    - Assert input/output balance ranges, route program allowlist, and slippage.
 
-4. **Marinade lifecycle**
-   - Preferred P0 stateful integration.
-   - Deposit/stake and observe the resulting position or liquid-staking balance.
-   - If current public interface or Surfpool program state blocks it at the adapter
-     checkpoint, implement native stake create/delegate/deactivate as the bounded
-     stateful fallback and record the blocker.
+4. **Native stake lifecycle**
+   - Create and initialize a stake account, delegate it to a local vote account, advance
+     the Surfpool clock, deactivate, advance again, and withdraw.
+   - Observe stake state and exact lamport postconditions at every transition.
+   - Keep this stateful path deterministic and entirely inside the pinned Surfpool state.
 
 5. **Orca LP**
-   - P1 only. Position creation and removal must be modeled as a lifecycle, not two
-     unrelated transactions.
+   - Explicitly deferred. Any future implementation must model position creation and
+     removal as one lifecycle, not two unrelated transactions.
 
 ## 11. Observer And Calibration
 
 The observer consumes only Surfpool's RPC endpoint. It may use Surfpool's lazy mainnet
 datasource, but application code never connects to a remote Solana RPC directly.
 
-P0 inputs:
+Required inputs:
 
 - deterministic synthetic ground truth for correctness;
 - traces generated by the naive baseline;
 - traces generated by the modeled scheduler;
 - chain receipts generated inside Surfpool.
 
-P1 may add a sanitized held-out feature fixture. Raw transactions are converted to
+An extension may add a sanitized held-out feature fixture. Raw transactions are converted to
 non-identifying feature rows before committing. The fixture records the source window,
 extractor version, filters, and limitations.
 
@@ -353,8 +369,10 @@ Otherwise the report says that no supported improvement was established.
 
 ## 13. Surfpool Development Contract
 
-The canonical RPC endpoint is http://127.0.0.1:8899. P0 code rejects non-loopback
-Solana RPC URLs. The exact workflow is documented in docs/SURFPOOL.md.
+The interactive default RPC endpoint is http://127.0.0.1:8899; isolated acceptance and
+full-demo runs default to port 18899. Code rejects non-loopback Solana RPC URLs and then
+requires the exact pinned Surfpool identity. The workflow is documented in
+docs/SURFPOOL.md.
 
 Required scenarios:
 
@@ -412,7 +430,7 @@ Every integration test starts or targets a named, isolated Surfnet and records:
 | scale | virtual 1,000 agents x 30 days | bounded memory and deterministic count |
 | soak | compressed Surfpool execution | no unreconciled submitted action |
 | evaluator | known ground truth | metric fixtures and ablations pass |
-| supply chain | cargo deny if time permits | no rejected license/source |
+| supply chain | cargo audit and cargo deny | no unacknowledged advisory or rejected license/source |
 
 The complete evidence requirements are in docs/VALIDATION.md.
 
@@ -449,7 +467,7 @@ Gate C: all three action types pass from a clean Surfnet with state assertions.
 
 ### Block D: stateful adapter and evaluator, 6:30 to 9:30
 
-- Spike and implement Marinade lifecycle, or activate native-stake fallback at checkpoint.
+- Implement the native stake create/delegate/deactivate/withdraw lifecycle.
 - Implement feature extraction, baselines, metrics, seed aggregation, and ablations.
 - Connect chain receipts to stable trace rows.
 
@@ -462,7 +480,23 @@ Gate D: one stateful lifecycle and evaluator known-ground-truth tests pass.
 - Generate evidence pack and full-demo output.
 - Update implementation status, limitations, architecture, and draft PR.
 
-Gate E: no P0 failure, no unsupported claim, no secret in Git, clean worktree.
+Gate E: no mandatory failure, no unsupported claim, no secret in Git, clean worktree.
+
+### Block F: canonical release proof and handoff
+
+- Run the five-seed, 1,000-agent by 30-day virtual soak from a clean commit.
+- Run 1,000 locally signed Surfpool transactions with response-loss, runtime-restart, and
+  persistent Surfpool-restart reconciliation.
+- Generate and review the sanitized checksum-bearing evidence pack.
+- Reproduce the complete canonical command twice from fresh clones and fresh Surfpool
+  state without touching a public network.
+- Push ordered commits and update the draft PR with implemented behavior and measured
+  limitations.
+- Resolve human-only/AI-assistance eligibility and obtain Marcelo's approval before any
+  submission or transition out of draft.
+
+Gate F: committed canonical evidence matches its source commit, both clean-clone runs pass,
+the PR remains draft, and no external approval is assumed.
 
 ## 17. Scope-Cut Rules
 
@@ -502,12 +536,15 @@ The draft PR remains reviewable through small, ordered commits:
 8. test: add Surfpool recovery and scale evidence
 9. docs: publish reproducible demo and supported claims
 
-The PR stays draft until all P0 gates pass. The initial draft contains planning material
-only and must not be interpreted as an implemented feature.
+The PR stays draft until every mandatory gate passes. Earlier planning-only commits must
+not be interpreted as evidence; only the implementation commits and checksum-bearing
+canonical pack support the final claims.
 
 ## 19. Sponsor Clarifications
 
-These questions do not block the safe local build, but they affect final submission:
+The listing currently reports `agentAccess: HUMAN_ONLY`. That blocks agent-API submission,
+but it does not itself answer whether a human may submit AI-assisted implementation. The
+following questions do not block the safe local build, but they do block final submission:
 
 - Does HUMAN_ONLY govern only the submitting profile, or AI-assisted implementation too?
 - Must the PR be merged, or only publicly reviewable, before the deadline?
@@ -526,11 +563,12 @@ Done means a new reviewer can:
 3. start a clean Surfpool network;
 4. execute the full demo without remote Solana writes;
 5. inspect successful signatures and state deltas;
-6. kill and restart the daemon during a submitted action;
-7. verify that recovery does not duplicate it;
-8. reproduce the 1,000-agent trace and evaluator report;
-9. understand exactly which privacy properties were and were not measured;
-10. verify that the Git history contains no external private code, secrets, or
+6. reproduce the injected response-loss and persistent Surfpool-restart recovery proof;
+7. verify that recovery does not duplicate a logical action or signature;
+8. reproduce the 1,000-agent trace, 1,000-transaction soak, and evaluator report;
+9. verify the same result from two fresh clones and clean Surfpool states;
+10. understand exactly which privacy properties were and were not measured;
+11. verify that the Git history contains no external private code, secrets, or
     unsupported claims.
 
 Anything less remains a draft.

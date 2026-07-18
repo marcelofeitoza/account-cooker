@@ -1,249 +1,182 @@
 # Surfpool Development Contract
 
+Status: implemented and exercised by the reduced full-demo rehearsal.
+
 Surfpool is mandatory for every chain-facing development, integration, recovery, and soak
-workflow in Account Cooker.
+workflow in Account Cooker. Application transactions are locally signed and submitted to
+loopback Surfpool only. `--network mainnet` permits Surfpool to read lazy-fork state; it
+does not make application transactions write to mainnet.
 
 ## 1. Pinned Environment
 
-Initial tool contract:
+`configs/surfpool.env` is the executable source of truth:
 
-- Surfpool CLI: 1.4.0.
-- Expected local binary: surfpool on PATH.
-- Verified binary SHA-256 on the planning machine:
-  11937d7655bc3a04dd90ae6e6038b9b9db59f2e0d48e1bed35b214fcae3dea24.
-- Application RPC: http://127.0.0.1:8899.
-- Application WebSocket: ws://127.0.0.1:8900.
+- Surfpool CLI `1.4.0`;
+- Darwin arm64 binary SHA-256
+  `11937d7655bc3a04dd90ae6e6038b9b9db59f2e0d48e1bed35b214fcae3dea24`;
+- Linux x86_64 binary SHA-256
+  `49907282c15e0d9a523c796fc150f3d784e53a68273e998916ee07cac24b59f0`;
+- interactive RPC/WebSocket defaults `127.0.0.1:8899` and `127.0.0.1:8900`;
+- isolated full-demo defaults `127.0.0.1:18899` and `127.0.0.1:18900`;
+- one trillion local airdrop lamports on a fresh persistent database;
+- maximum 2,000 Surfpool profiles.
 
-The implementation drives the CLI and JSON-RPC. It does not mix Surfpool 1.4.0 with a
-different surfpool-sdk crate version.
+The harness refuses an unsupported platform, wrong version, wrong binary digest,
+non-loopback host, malformed port, occupied port, or conflicting port assignment.
 
-## 2. Canonical Interactive Network
+## 2. Lifecycle
 
-The planned start script performs:
+Start, verify, and stop the default local network:
 
-    mkdir -p .surfpool/keys .surfpool/state .surfpool/logs
-    solana-keygen new --silent --no-bip39-passphrase --force \
-      --outfile .surfpool/keys/funder.json
-    surfpool start \
-      --network mainnet \
-      --host 127.0.0.1 \
-      --port 8899 \
-      --ws-port 8900 \
-      --no-deploy \
-      --no-tui \
-      --no-studio \
-      --db .surfpool/state/noise.sqlite \
-      --surfnet-id noise-dev \
-      --airdrop-keypair-path .surfpool/keys/funder.json \
-      --airdrop-amount 1000000000000 \
-      --max-profiles 2000 \
-      --log-path .surfpool/logs
+```bash
+./scripts/surfpool-start.sh
+./scripts/surfpool-doctor.sh
+./scripts/surfpool-stop.sh
+```
 
-The mainnet network is a read datasource for lazy account hydration. All application
-transactions execute locally inside Surfpool.
+The start script:
 
-Use 127.0.0.1 explicitly. Do not depend on global Solana CLI configuration.
+1. verifies the pinned binary and snapshot digests;
+2. creates mode-0700 ignored key/state/log directories;
+3. generates or validates a mode-0600 funder under `.surfpool/keys`;
+4. refuses to attach to an unowned process or occupied port;
+5. starts Surfpool with no deploy, TUI, or Studio surface;
+6. waits for `getVersion`, requires the exact `surfnet-version`, and calls
+   `surfnet_getSurfnetInfo`;
+7. writes a mode-0600 runtime environment and session provenance record.
 
-## 3. Fail-Closed Network Guard
+The stop script signals only the PID recorded by this harness after verifying that the
+process command is the pinned Surfpool binary. It never uses a broad process-kill command.
 
-Before loading a signer, opening the runtime store, or claiming an action:
+## 3. Fail-Closed Application Guard
 
-1. Parse RPC and WebSocket URLs into Surfpool-only validated types.
-2. Require an IP-loopback host.
-3. Call getVersion and require a surfnet-version field.
-4. Call surfnet_getSurfnetInfo successfully.
-5. Record Surfpool, Solana-core, genesis/network, and Surfnet identity.
-6. Compare the identity to any persisted run being resumed.
+`SurfpoolRpcUrl` accepts only HTTP(S) URLs whose host resolves syntactically to IPv4 or
+IPv6 loopback. `SurfpoolGateway::connect` then requires Surfpool `1.4.0` and a valid
+Surfnet-info response.
 
-The process exits before signer loading for:
+Online CLI commands perform this preflight before loading a signer. Preview, `status`, and
+configuration validation perform no network request and load no signer. Runtime state is
+bound to its configured Surfnet identity; a mismatched store or fleet manifest is rejected.
 
-- https://api.mainnet-beta.solana.com;
-- https://api.devnet.solana.com;
-- any non-loopback hostname or IP;
-- a local Solana validator that does not answer Surfpool-specific RPC;
-- a different Surfnet identity when resuming durable state.
+The following fail before transaction construction:
 
-A negative integration test proves each failure.
+- mainnet, devnet, testnet, or any other non-loopback RPC URL;
+- a local validator that does not expose Surfpool identity RPCs;
+- a Surfpool version other than `1.4.0`;
+- a durable store or fleet manifest bound to another Surfnet;
+- a signer outside the project root's `.surfpool/keys` directory.
 
-## 4. Two Test Modes
+## 4. Reviewed Jupiter State
 
-### Live acceptance mode
+Deterministic Jupiter acceptance uses:
 
-- Starts the canonical mainnet-shaped Surfpool fork.
-- Lazily fetches current program and account state.
-- Uses live public quote/instruction APIs when needed.
-- Builds with Surfpool blockhashes.
-- Simulates, submits, confirms, and observes locally.
-- Captures the pre-state required for deterministic fixtures.
+```text
+fixtures/surfpool/jupiter/
+  raydium-clmm-sol-usdc-433717382.snapshot.json.gz
+  raydium-clmm-sol-usdc-433717382.snapshot.manifest.json
+  raydium-clmm-sol-usdc-cyb-433411234.quote.json
+  raydium-clmm-sol-usdc-cyb-433411234.instructions.json
+```
 
-This mode has network reads but no remote Solana writes.
+The archive contains 21 public accounts from a Surfpool `preTransaction` export at slot
+`433717382`. It includes the Raydium CLMM/Jupiter program state and lookup table needed for
+the reviewed SOL-to-USDC route. The fixture signer account was removed, and no private key
+or signed transaction is present.
 
-### Deterministic CI mode
+The harness verifies:
 
-Planned shape:
+- archive SHA-256
+  `f1efd977ec801baec8856e594d215965414440a8a0158b7fcc607b1bb196f2b1`;
+- decompressed SHA-256
+  `b2c428d69c90388c3dcdfa91f1789c82a6584544885eb6272b55cbb7094aeaab`.
 
-    surfpool start \
-      --offline \
-      --snapshot fixtures/surfpool/account-cooker-v1.json \
-      --host 127.0.0.1 \
-      --port 8899 \
-      --ws-port 8900 \
-      --no-deploy \
-      --ci \
-      --db :memory: \
-      --surfnet-id noise-ci-<run-id>
+At runtime the acceptance test changes only three reviewed identities in the instruction
+account metas: the fixture signer, its WSOL ATA, and its USDC ATA. A non-network invariant
+test reverses those substitutions and proves the complete instruction response is
+otherwise byte-equivalent. The new transaction uses a current Surfpool blockhash and the
+fresh local signer, then simulates, submits, confirms, and checks exact token deltas.
 
-CI uses:
+Live Jupiter quote/instruction retrieval remains an explicitly selected planning mode. It
+never receives a private key or signed transaction, and the same mint, amount, slippage,
+program, account, blockhash, simulation, and postcondition checks apply. Canonical evidence
+uses the reviewed fixture so current pool movement cannot invalidate reproducibility.
 
-- reviewed account/program snapshots;
-- recorded off-chain quote/instruction responses;
-- real transaction building and real program execution inside Surfpool;
-- a fresh Surfnet ID and in-memory database per integration group.
+## 5. Persistent Restart Contract
 
-Successful swaps are not mocked. Recorded responses supply deterministic planning inputs;
-the snapshotted programs and accounts execute the transaction.
+Every persistent Surfpool database has a companion session record containing:
 
-## 5. Funding And Token Setup
+- binary version and digest;
+- network, Surfnet ID, RPC/WebSocket endpoints, and database path;
+- snapshot archive and decompressed digests;
+- configured and effective airdrop amounts;
+- whether this start resumed an existing database.
 
-- SOL comes from Surfpool's startup airdrop to the generated funder.
-- Agent wallets receive bounded local funding actions through the cooker.
-- Token fixtures use Surfpool token-account cheatcodes or reviewed snapshots.
-- USDC uses the canonical mint only inside the local Surfnet.
-- Generated keypairs live under .surfpool/keys and are ignored.
-- No fixture keypair is committed.
+On restart, the harness requires exact provenance equality. It sets the effective airdrop
+to zero so the funder's balance is not reset while destination accounts retain prior
+state. A database without its key/session, a session without its database, or any identity
+mismatch fails closed.
 
-Where clock-sensitive program state is used, align the Surfnet clock forward through the
-Surfpool time-travel RPC before execution. Never move it backward across persisted actions.
+## 6. Chain Acceptance
 
-## 6. Jupiter Workflow
+Run the adapter and fault matrix against an isolated Surfpool:
 
-Jupiter is an off-chain planner only:
+```bash
+./scripts/surfpool-chain-acceptance.sh
+```
 
-1. Request a quote from the documented public quote endpoint.
-2. Request swap instructions, not a submitted transaction.
-3. Apply route, program, mint, amount, slippage, and price-impact policy.
-4. Hydrate referenced accounts through Surfpool.
-5. Obtain the recent blockhash from Surfpool.
-6. Build and sign the versioned transaction locally.
-7. Resolve lookup tables through Surfpool.
-8. Simulate through Surfpool.
-9. Submit and confirm through Surfpool.
-10. Assert token balance deltas and route receipts through Surfpool.
+It executes and records sanitized structured evidence for:
 
-Initial live acceptance constrains the route to a known supported DEX to cap account and
-snapshot breadth. The selected route and program hashes are recorded in evidence.
+1. native SOL transfer with exact principal and fee attribution;
+2. Jupiter exact-input SOL-to-USDC swap from reviewed state with signer rebinding;
+3. classic SPL transfer with ATA creation and later historical re-audit;
+4. native stake create/delegate/deactivate/withdraw lifecycle;
+5. simulation failure, stale-blockhash expiry, and same-signature unknown reconciliation.
 
-No Jupiter or third-party endpoint receives a signed transaction.
+Native stake acceptance advances the Surfpool clock across epochs. It therefore runs last
+in the complete demo, after every persistent-restart proof. Moving a restarted node behind
+already recorded future-slot transactions would make confirmation semantics ambiguous.
 
-## 7. Fixture Capture
+## 7. Soaks And Recovery
 
-After a successful live adapter transaction:
+The canonical real-chain soak is:
 
-1. export the pre-transaction Surfpool snapshot for accounts/programs touched;
-2. normalize and sort account maps;
-3. detect conflicting duplicate account definitions;
-4. attach metadata;
-5. review size, ownership, and secrets;
-6. commit the deterministic JSON fixture.
+```bash
+./scripts/surfpool-soak.sh --transactions 1000
+```
 
-Metadata includes:
+It uses bounded concurrency, injects exactly one lost send response only after that
+signature is observable, reconstructs the runtime, restarts Surfpool against the same
+database, and reconciles without resend. Acceptance requires:
 
-- Surfpool and Solana-core versions;
-- source slot and block time;
-- local source transaction signature;
-- adapter and route label;
-- program IDs and ProgramData hashes;
-- mint IDs and lookup tables;
-- capture tool version;
-- snapshot content hash.
+- 1,000 confirmed logical actions and 1,000 unique signatures;
+- exact payer debit equal to transferred principal plus transaction fees;
+- one response-loss recovery and at least one visibility barrier;
+- one runtime reconstruction and one Surfpool process restart;
+- zero failures, duplicates, budget violations, or unresolved Submitted/Unknown actions;
+- peak workers no greater than configured concurrency.
 
-The mutable Surfpool SQLite database is never committed.
+The six-checkpoint process-crash matrix is an exhaustive SQLite runtime integration test
+with a deterministic chain gateway. The Surfpool soak separately supplies the real-chain
+response-loss and persistent-node-restart proof.
 
-## 8. Required Adapter Scenarios
+## 8. Isolation And Secrets
 
-For each adapter:
+- Full-demo runs allocate unique database, PID, key, session, runtime-env, and log paths.
+- A caller may override ports and paths, but all generated keys must stay below the
+  project's ignored `.surfpool/keys` boundary.
+- Keys, signed bytes, full signatures, mutable SQLite files, raw logs, and decompressed
+  snapshots are never committed.
+- Evidence contains shortened local signatures, public state deltas, version/hash
+  provenance, and explicit `public_network_writes: 0`.
+- Raw and sanitized outputs must remain below `evidence/raw` and `evidence`, respectively;
+  traversal paths and overwrite attempts are rejected.
 
-- successful plan, simulation, submission, confirmation, and observation;
-- insufficient balance;
-- missing required account and account-creation path where supported;
-- policy-rejected mint/program/destination;
-- stale blockhash before submission;
-- simulation failure;
-- unknown submission response;
-- idempotent reconciliation after restart;
-- exact pre/post lamport or token assertions;
-- local getTransaction logs captured.
-
-No adapter is called complete from instruction construction alone.
-
-## 9. Fault Scenarios
-
-Surfpool scenarios or cheatcodes exercise:
-
-- paused and advanced clock;
-- expired blockhash;
-- offline/missing account;
-- low balance;
-- adverse token or pool state;
-- process crash before send;
-- cooker crash after send and before confirmation persistence;
-- Surfpool interruption after send;
-- Surfpool restart with the same database and Surfnet ID;
-- concurrent workers contending for one wallet;
-- kill switch before a local signature;
-- daily budget exhaustion.
-
-The postcondition for every unknown-outcome fault is one logical action and at most one
-landed transaction.
-
-## 10. Isolation
-
-- Tests do not share mutated Surfnet state.
-- Each test group gets a fresh ID and database.
-- Interactive evidence runs use a named persistent Surfnet.
-- Ports are checked before startup.
-- Scripts terminate only processes they started and record their PIDs.
-- No broad process-kill command is used.
-- Logs and profiles stay with the evidence run until summarized.
-
-## 11. Historical Data Limitation
+## 9. Historical Limitation
 
 Surfpool lazy cloning does not guarantee complete historical mainnet transaction bodies.
+Adapter fidelity therefore relies on fresh transactions executed inside Surfpool,
+evaluator correctness relies on synthetic known ground truth, and the public report does
+not describe a lazy fork as full historical-chain validation.
 
-Therefore:
-
-- adapter tests rely on fresh local transactions;
-- evaluator correctness relies on synthetic known ground truth;
-- chain-fidelity reports use cooker-generated local receipts;
-- any observed-reference fixture states its separate provenance;
-- no report describes a lazy fork as full historical-chain validation.
-
-Jito bundle behavior is not part of P0 because Surfpool does not emulate Jito's external
-bundle service.
-
-## 12. Evidence Runs
-
-Evidence mode must retain profiles and logs, so it does not use the quiet --ci preset.
-
-Capture:
-
-- Surfpool binary version and hash;
-- start command and Surfnet identity;
-- snapshot/scenario hashes;
-- application revision and config hash;
-- model and seeds;
-- local signatures;
-- transaction profiles and logs;
-- pre/post balances;
-- application SQLite journal summary;
-- restart/fault results;
-- evaluator metrics.
-
-All signatures are local Surfpool signatures and are labeled as such.
-
-## 13. Development Rule
-
-If a chain-facing path cannot be reproduced through Surfpool, it is incomplete.
-
-Direct devnet or mainnet testing is not a development fallback. Any later public-network
-proof requires a separate explicit decision outside P0.
+If a chain-facing path cannot be reproduced through Surfpool, it is incomplete. Direct
+devnet or mainnet testing is not a development fallback.

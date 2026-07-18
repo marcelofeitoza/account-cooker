@@ -1,6 +1,7 @@
 # Threat Model And Claim Policy
 
-Status: design contract; no privacy result is claimed.
+Status: implemented claim contract. No anonymity, unlinkability, or human-indistinguishability
+result is claimed; canonical comparative evidence is pending.
 
 ## 1. Purpose
 
@@ -39,7 +40,7 @@ and historical graph relationships.
 
 ### Infrastructure observer
 
-May observe RPC timing, client network metadata, or pre-inclusion flow. P0 does not model
+May observe RPC timing, client network metadata, or pre-inclusion flow. The evaluator does not model
 or defend network-layer correlation.
 
 ### Statistical clusterer
@@ -59,7 +60,7 @@ mislabel generated traffic.
 
 ## 4. Observed Leakage Channels
 
-| Channel | Visible signal | P0 treatment |
+| Channel | Visible signal | Implemented treatment |
 |---|---|---|
 | funding | common ancestor, star fan-out | measured; not claimed solved |
 | fee payer | reused signer or payer | measured and policy-constrained |
@@ -68,7 +69,7 @@ mislabel generated traffic.
 | sequence | repeated protocol transitions | conditional model and evaluator |
 | synchrony | wallets acting together | global scheduler and evaluator |
 | consolidation | common fan-in and delay | explicit lifecycle and policy |
-| destination | repeated counterparties | measured; restricted in safe P0 |
+| destination | repeated counterparties | measured; restricted by policy |
 | transaction data | programs, accounts, amounts | not hidden |
 | network metadata | IP/RPC connection timing | out of scope |
 | external identity | KYC, exchange, public disclosures | out of scope |
@@ -116,7 +117,7 @@ Synthetic correctness and privacy effectiveness are separate:
 If all wallets receive funds from a labeled operator wallet, the funding graph directly
 links them. Timing and action diversity cannot undo that historical edge.
 
-P0 therefore:
+The implementation therefore:
 
 - measures common funding explicitly;
 - reports results both with and without funding features;
@@ -136,7 +137,7 @@ content of those actions.
 
 ## 9. Abuse Controls
 
-P0 excludes:
+The implementation excludes:
 
 - self-trades and reciprocal fleet trades;
 - volume loops intended to inflate metrics;
@@ -158,7 +159,7 @@ Controls:
 - cooldowns and minimum reserves;
 - kill switch and graceful shutdown;
 - generated-traffic attribution in local records;
-- no public-network execution code path in P0.
+- no public-network execution path through the validated gateway.
 
 ## 10. Operational Threats
 

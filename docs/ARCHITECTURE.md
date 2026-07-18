@@ -1,6 +1,6 @@
 # Architecture
 
-Status: design contract; implementation has not started.
+Status: implemented architecture; canonical release evidence is pending.
 
 ## 1. System Shape
 
@@ -50,12 +50,12 @@ deterministic fleet generation. Chain-facing behavior always uses Surfpool.
 
 Owns stable domain contracts:
 
-- AgentId, RunId, ModelId, ActionId, AttemptId.
+- AgentId, RunId, ActionId, LeaseId, and deterministic identity derivation.
 - Persona and SessionState.
-- AgentSnapshot and BalanceSnapshot.
-- ActionIntent, PlannedAction, PreparedAction, ActionReceipt.
-- ActionKind, ProtocolId, AssetId, Budget, PolicyDecision.
-- BehaviorModel, ActionAdapter, PolicyEngine, Clock contracts.
+- AgentSnapshot, BudgetUsage, and StateExpectation.
+- PlannedAction, PreparedAction, SimulationReceipt, and ChainReceipt.
+- ActionKind, ActionPayload, ActionState, ConfirmationStatus, and PolicyDecision.
+- BehaviorModel, ActionAdapter, Policy, StateStore, ChainGateway, and Clock contracts.
 - Deterministic seed derivation and virtual scheduling.
 
 It depends only on general-purpose crates. It does not know SQLite, JSON-RPC,
@@ -72,7 +72,7 @@ Owns persistence:
 - Immutable action event journal.
 - Reconciliation queries and run checkpoints.
 
-The first store is single-host. The Store trait preserves a future path to Postgres
+The store is deliberately single-host. The StateStore trait preserves a future path to Postgres
 without pretending SQLite provides cross-host coordination.
 
 ### cooker-solana
@@ -81,7 +81,7 @@ Owns all Solana-specific behavior:
 
 - SurfpoolRpcUrl validated type.
 - Surfpool identity and health probes.
-- Solana RPC and WebSocket transport.
+- Solana JSON-RPC transport and confirmation polling.
 - SignerProvider and local ephemeral signer.
 - Blockhash, transaction, fee, simulation, submission, confirmation, observation.
 - Native, SPL, Jupiter, and stateful adapter modules.
@@ -193,7 +193,7 @@ Properties:
 - O(log n) enqueue and dequeue.
 - No sleeping task per agent.
 - One active lease per wallet.
-- Global and per-protocol concurrency bounds.
+- A global worker bound and one active lease per wallet.
 - Fairness for agents sharing the same due window.
 - Backpressure when the store, RPC, or adapter slows.
 - Cancellation stops new claims before in-flight work drains.
@@ -203,7 +203,9 @@ the next due action or a wake-up notification.
 
 ## 7. Durable Schema
 
-Planned tables:
+Six embedded migrations create `store_identity`, `schema_migrations`, `runs`, `agents`,
+`actions`, `leases`, `prepared_transactions`, `simulations`, `submissions`, `receipts`,
+`action_events`, `traces`, `action_deferrals`, and `confirmation_audits`.
 
 ### runs
 
@@ -240,8 +242,8 @@ Planned tables:
 - submitted_at, observed_at;
 - simulation and confirmation summaries.
 
-Signed bytes may be stored locally for exact retry, but never exported to evidence when
-doing so would expose a signer or reusable transaction.
+Signed bytes are stored locally for exact observation/reconciliation, but are never
+exported to evidence.
 
 ### events
 
@@ -266,7 +268,6 @@ Primary path:
 Alternative states:
 
 - Rejected: policy or deterministic validation failed.
-- Retryable: no chain side effect and a bounded retry is safe.
 - Unknown: the response cannot establish whether submission landed.
 - Failed: a confirmed chain error.
 - Expired: the intent or quote is no longer valid.
@@ -358,24 +359,29 @@ The evaluator creates:
 - baseline comparisons;
 - ablations and seed summaries.
 
-No evaluator result changes runtime behavior in P0. This prevents feedback from silently
+No evaluator result changes runtime behavior. This prevents feedback from silently
 optimizing for the exact test set.
 
 ## 13. CLI Contract
 
-Planned commands:
+Implemented commands:
 
+- cooker keygen
+- cooker fleet-init
+- cooker fund
 - cooker init
-- cooker doctor
+- cooker validate
 - cooker plan
 - cooker simulate
+- cooker evaluate
+- cooker soak
+- cooker doctor
 - cooker run
 - cooker status
 - cooker recover
-- cooker evaluate
 
-run is dry-run unless explicit execution and policy acknowledgement are present. P0 still
-rejects non-Surfpool networks even with acknowledgement.
+`fund`, `run`, and `recover` remain previews unless explicit execution and policy
+acknowledgement are present. Non-Surfpool networks are rejected even with acknowledgement.
 
 Every command supports JSON output. Secret configuration values are never emitted.
 
@@ -383,19 +389,17 @@ Every command supports JSON output. Secret configuration values are never emitte
 
 - 1,000 agents for 30 virtual days in one process.
 - Bounded tasks independent of fleet size.
-- Bounded channel capacities.
 - One SQLite writer boundary and WAL readers.
-- Configurable global and per-protocol concurrency.
-- No full-trace retention in memory during long runs.
-- Streaming evaluator input and incremental report aggregates where practical.
+- Configurable global concurrency with per-wallet exclusivity.
+- Per-seed trace materialization followed by atomic JSONL streaming and replay.
+- Canonical evidence records action count, wall time, and peak RSS rather than implying
+  unbounded scale.
 
 The evidence report records wall time, peak memory when available, action count, and
 database size. It does not generalize one-machine performance into an unsupported claim
 about unlimited scale.
 
-## 15. Future Extension Points
-
-After P0:
+## 15. Deliberately Unimplemented Extensions
 
 - Postgres Store for multiple hosts.
 - Remote/KMS signer providers.
@@ -404,4 +408,5 @@ After P0:
 - Coordinator API and authenticated worker leases.
 - More sophisticated attacker models.
 
-These are extension points, not implied first-release capabilities.
+These are extension points, not implied capabilities or completion gates for this bounty
+deliverable.
