@@ -1,0 +1,36 @@
+[package]
+name = "account-cooker"
+description = "Measured behavioral workload CLI for local Surfpool networks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "cooker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+blake3.workspace = true
+chrono.workspace = true
+clap.workspace = true
+cooker-core = { version = "0.1.0", path = "../cooker-core" }
+cooker-eval = { version = "0.1.0", path = "../cooker-eval" }
+cooker-runtime = { version = "0.1.0", path = "../cooker-runtime" }
+cooker-solana = { version = "0.1.0", path = "../cooker-solana" }
+cooker-store = { version = "0.1.0", path = "../cooker-store" }
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+solana-pubkey = "4.2.0"
+tempfile.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

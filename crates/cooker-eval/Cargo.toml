@@ -1,0 +1,21 @@
+[package]
+name = "cooker-eval"
+description = "Adversarial trace evaluation and comparative reporting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+blake3.workspace = true
+chrono.workspace = true
+cooker-core = { version = "0.1.0", path = "../cooker-core" }
+rand.workspace = true
+rand_chacha.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

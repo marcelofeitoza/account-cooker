@@ -1,0 +1,27 @@
+[package]
+name = "cooker-core"
+description = "Deterministic domain model and contracts for Account Cooker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+blake3.workspace = true
+chrono.workspace = true
+hex.workspace = true
+rand_chacha.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

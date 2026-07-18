@@ -1,0 +1,24 @@
+[package]
+name = "cooker-runtime"
+description = "Bounded scheduler and recoverable action runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+cooker-core = { version = "0.1.0", path = "../cooker-core" }
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+cooker-store = { version = "0.1.0", path = "../cooker-store" }
+tempfile.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
