@@ -48,7 +48,7 @@ evidence runs executes only inside loopback Surfpool.
 
 The current topology is one local controller, one SQLite store, local signer files, and
 one loopback Surfpool process. The stateful adapter is native Solana stake, not Marinade.
-Deterministic Jupiter evidence uses a reviewed lazy-fork snapshot captured at a fixed slot;
+Deterministic Jupiter evidence uses a reviewed snapshot captured from a lazy fork at a fixed slot;
 its age and limited account set make it reproducible, not representative of current market
 state.
 
@@ -61,6 +61,10 @@ The pinned environment is:
 - Agave CLI `3.1.8` for `solana-keygen`;
 - `bash`, `curl`, `gzip`, `jq`, `lsof`, and `shellcheck`;
 - `cargo-audit 0.22.1`, `cargo-deny 0.20.2`, and Gitleaks `8.30.1` for the complete gate.
+
+The harness starts Surfpool offline from that pinned snapshot with instruction profiling
+disabled. Remote account misses and profiling are not part of the acceptance claim and
+would otherwise add external rate limits or unrelated resource work to sustained execution.
 
 Run the reduced rehearsal while developing:
 
@@ -79,8 +83,8 @@ scans, a release build, the full CLI lifecycle, the five-seed evaluator, a deter
 1,000-agent by 30-day virtual soak, a faulted 1,000-transaction Surfpool soak, and six
 acceptance groups: native SOL, reviewed-state Jupiter, classic SPL, fault reconciliation,
 the six-checkpoint process-crash matrix, and native stake. Stake runs last because it
-advances Surfpool across epochs. The demo uses fresh, isolated Surfpool state and never
-writes to a public RPC.
+advances Surfpool across epochs. The demo uses fresh, isolated, offline Surfpool state; no
+chain RPC request leaves loopback and no transaction is written to a public RPC.
 
 ## CLI
 

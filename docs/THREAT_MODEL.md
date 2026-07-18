@@ -234,8 +234,8 @@ Additional fixed limitations are:
 - a common fleet funder remains directly observable;
 - attacker traces and controller labels are synthetic known ground truth, not a sample of
   the complete human Solana population;
-- deterministic Jupiter proof uses a route-specific lazy-fork snapshot frozen at slot
-  `433717382`, not current market state;
+- deterministic Jupiter proof uses a route-specific offline snapshot captured from a lazy
+  fork at slot `433717382`, not current market state;
 - coordination is one local controller, local signer files, SQLite, and loopback Surfpool,
   not a distributed or public-network topology;
 - the stateful protocol path is native Solana stake, not Marinade.

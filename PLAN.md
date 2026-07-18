@@ -319,8 +319,9 @@ are sampled separately from transitions so the engine does not become a memoryle
 
 ## 11. Observer And Calibration
 
-The observer consumes only Surfpool's RPC endpoint. It may use Surfpool's lazy mainnet
-datasource, but application code never connects to a remote Solana RPC directly.
+The observer consumes only Surfpool's loopback RPC endpoint. Canonical runs load the pinned
+reviewed snapshot in Surfpool offline mode, so neither the observer nor Surfpool performs a
+remote chain-RPC lookup.
 
 Required inputs:
 
@@ -405,7 +406,7 @@ response, runtime reconstruction, persistent Surfpool restart, and reconciliatio
 Every integration test starts or targets a named, isolated Surfnet and records:
 
 - Surfpool version;
-- datasource mode;
+- offline datasource mode;
 - Surfnet ID;
 - snapshot or scenario hashes;
 - slot and blockhash context;

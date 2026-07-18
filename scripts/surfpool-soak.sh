@@ -107,6 +107,7 @@ jq -e --argjson expected "${transactions}" '
   and .response_loss_reconciled_without_resend == 1
   and .runtime_stack_restarts == 1
   and .surfpool_process_restarts == 1
+  and .surfpool_restart_provenance.offline_mode == true
   and .peak_worker_count <= .max_concurrency
   and .state_delta.payer_debit_lamports
       == .state_delta.transferred_lamports + .state_delta.fees_lamports
@@ -116,6 +117,7 @@ jq '{
   surfpoolVersion,
   binarySha256,
   network,
+  offlineMode,
   surfnetId,
   rpcUrl: "http://127.0.0.1:<local>",
   database: "persistent-local-surfnet",
@@ -123,6 +125,7 @@ jq '{
   snapshotSha256,
   configuredAirdropLamports,
   effectiveAirdropLamports,
+  instructionProfilingDisabled,
   resumedPersistentDatabase
 }' "${SURFPOOL_SESSION_FILE}" >"${output_dir}/surfpool-session.json"
 

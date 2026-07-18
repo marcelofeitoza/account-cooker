@@ -60,7 +60,8 @@ particular:
 
 - a common funding graph remains directly observable;
 - evaluator attacks and ownership labels use synthetic known ground truth;
-- reviewed Jupiter state is a 21-account lazy-fork snapshot frozen at slot `433717382`;
+- reviewed Jupiter state is a 21-account offline snapshot captured from a lazy fork and
+  frozen at slot `433717382`;
 - execution uses one local controller, SQLite store, local signers, and loopback Surfpool;
 - the stateful adapter is native Solana stake, not Marinade.
 

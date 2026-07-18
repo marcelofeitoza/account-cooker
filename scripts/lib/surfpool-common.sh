@@ -74,7 +74,7 @@ surfpool_is_uint() {
 
 surfpool_validate_settings() {
   [[ "${SURFPOOL_NETWORK}" == "mainnet" ]] ||
-    surfpool_die "SURFPOOL_NETWORK must be mainnet for the canonical lazy fork"
+    surfpool_die "SURFPOOL_NETWORK must be mainnet for the canonical snapshot baseline"
   [[ "${SURFPOOL_HOST}" == "127.0.0.1" ]] ||
     surfpool_die "SURFPOOL_HOST must be the explicit loopback address 127.0.0.1"
 
@@ -244,6 +244,7 @@ surfpool_build_start_command() {
   SURFPOOL_START_COMMAND=(
     "${SURFPOOL_BIN}" start
     --network "${SURFPOOL_NETWORK}"
+    --offline
     --host "${SURFPOOL_HOST}"
     --port "${SURFPOOL_PORT}"
     --ws-port "${SURFPOOL_WS_PORT}"
@@ -251,6 +252,7 @@ surfpool_build_start_command() {
     --no-deploy
     --no-tui
     --no-studio
+    --disable-instruction-profiling
     --snapshot "${SURFPOOL_SNAPSHOT_FILE}"
     --db "${SURFPOOL_DB}"
     --surfnet-id "${SURFPOOL_ID}"
@@ -382,6 +384,7 @@ surfpool_pid_matches() {
       .binarySha256 == $binarySha256 and
       .surfpoolVersion == $surfpoolVersion and
       .network == $network and
+      .offlineMode == true and
       .host == $host and
       .rpcPort == $rpcPort and
       .websocketPort == $websocketPort and
@@ -394,6 +397,7 @@ surfpool_pid_matches() {
       .airdropKeypair == $airdropKeypair and
       .configuredAirdropLamports == $configuredAirdropLamports and
       .effectiveAirdropLamports == $effectiveAirdropLamports and
+      .instructionProfilingDisabled == true and
       .maxProfiles == $maxProfiles and
       .logPath == $logPath and
       .snapshotArchiveSha256 == $snapshotArchiveSha256 and
@@ -516,6 +520,7 @@ surfpool_write_session() {
     --arg binarySha256 "${binary_sha256}" \
     --arg surfpoolVersion "${SURFPOOL_EXPECTED_VERSION}" \
     --arg network "${SURFPOOL_NETWORK}" \
+    --argjson offlineMode true \
     --arg host "${SURFPOOL_HOST}" \
     --argjson rpcPort "${SURFPOOL_PORT}" \
     --argjson websocketPort "${SURFPOOL_WS_PORT}" \
@@ -530,13 +535,14 @@ surfpool_write_session() {
     --arg snapshotSha256 "${SURFPOOL_SNAPSHOT_SHA256}" \
     --argjson configuredAirdropLamports "${SURFPOOL_AIRDROP_LAMPORTS}" \
     --argjson effectiveAirdropLamports "${effective_airdrop_lamports}" \
+    --argjson instructionProfilingDisabled true \
     --argjson maxProfiles "${SURFPOOL_MAX_PROFILES}" \
     --arg logPath "${SURFPOOL_LOG_DIR}" \
     --arg processCommandLine "${process_command_line}" \
     --argjson startArguments "${start_arguments}" \
     --argjson resumedPersistentDatabase "${resumed_persistent_database}" \
     --argjson pid "${pid}" \
-    '{sessionSchemaVersion:$sessionSchemaVersion,startedAt:$startedAt,pid:$pid,processStartIdentity:$processStartIdentity,binary:$binary,binarySha256:$binarySha256,surfpoolVersion:$surfpoolVersion,network:$network,host:$host,rpcPort:$rpcPort,websocketPort:$websocketPort,studioPort:$studioPort,surfnetId:$surfnetId,rpcUrl:$rpcUrl,wsUrl:$wsUrl,database:$database,snapshot:$snapshot,airdropKeypair:$airdropKeypair,snapshotArchiveSha256:$snapshotArchiveSha256,snapshotSha256:$snapshotSha256,configuredAirdropLamports:$configuredAirdropLamports,effectiveAirdropLamports:$effectiveAirdropLamports,maxProfiles:$maxProfiles,logPath:$logPath,processCommandLine:$processCommandLine,startArguments:$startArguments,resumedPersistentDatabase:$resumedPersistentDatabase}' \
+    '{sessionSchemaVersion:$sessionSchemaVersion,startedAt:$startedAt,pid:$pid,processStartIdentity:$processStartIdentity,binary:$binary,binarySha256:$binarySha256,surfpoolVersion:$surfpoolVersion,network:$network,offlineMode:$offlineMode,host:$host,rpcPort:$rpcPort,websocketPort:$websocketPort,studioPort:$studioPort,surfnetId:$surfnetId,rpcUrl:$rpcUrl,wsUrl:$wsUrl,database:$database,snapshot:$snapshot,airdropKeypair:$airdropKeypair,snapshotArchiveSha256:$snapshotArchiveSha256,snapshotSha256:$snapshotSha256,configuredAirdropLamports:$configuredAirdropLamports,effectiveAirdropLamports:$effectiveAirdropLamports,instructionProfilingDisabled:$instructionProfilingDisabled,maxProfiles:$maxProfiles,logPath:$logPath,processCommandLine:$processCommandLine,startArguments:$startArguments,resumedPersistentDatabase:$resumedPersistentDatabase}' \
     >"${temp_file}"
   chmod 600 "${temp_file}"
   mv "${temp_file}" "${SURFPOOL_SESSION_FILE}"

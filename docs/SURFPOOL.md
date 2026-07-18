@@ -5,8 +5,8 @@ release gates; no canonical evidence pack is claimed yet.
 
 Surfpool is mandatory for every chain-facing development, integration, recovery, and soak
 workflow in Account Cooker. Application transactions are locally signed and submitted to
-loopback Surfpool only. `--network mainnet` permits Surfpool to read lazy-fork state; it
-does not make application transactions write to mainnet.
+loopback Surfpool only. The harness uses the mainnet feature baseline in offline mode and
+loads every non-native account it needs from the pinned reviewed snapshot.
 
 ## 1. Pinned Environment
 
@@ -110,12 +110,23 @@ Every persistent Surfpool database has a companion session record containing:
 - network, Surfnet ID, RPC/WebSocket endpoints, and database path;
 - snapshot archive and decompressed digests;
 - configured and effective airdrop amounts;
+- the mandatory instruction-profiling-disabled setting;
+- the mandatory offline-datasource setting;
 - whether this start resumed an existing database.
 
 On restart, the harness requires exact provenance equality. It sets the effective airdrop
 to zero so the funder's balance is not reset while destination accounts retain prior
 state. A database without its key/session, a session without its database, or any identity
 mismatch fails closed.
+
+Instruction profiling is disabled in the exact recorded start command. The canonical soak
+measures transaction durability and state, not Surfpool's optional instruction profiler;
+keeping it enabled would add an unrelated CPU and memory workload to the 1,000-transaction
+gate.
+
+Offline mode is also part of that exact command and session contract. This prevents unique
+soak destinations from becoming lazy remote account fetches, removes external provider rate
+limits from the result, and makes missing-account behavior deterministic.
 
 ## 6. Chain Acceptance
 
@@ -181,16 +192,16 @@ reconciliation without resend.
 - Keys, signed bytes, full signatures, mutable SQLite files, raw logs, and decompressed
   snapshots are never committed.
 - Evidence contains shortened local signatures, public state deltas, version/hash
-  provenance, and explicit `public_network_writes: 0`.
+  provenance, and explicit `public_chain_rpc_reads: 0` and `public_network_writes: 0`.
 - Raw and sanitized outputs must remain below `evidence/raw` and `evidence`, respectively;
   traversal paths and overwrite attempts are rejected.
 
 ## 9. Historical Limitation
 
-Surfpool lazy cloning does not guarantee complete historical mainnet transaction bodies.
+The pinned offline snapshot does not contain complete historical mainnet transaction bodies.
 Adapter fidelity therefore relies on fresh transactions executed inside Surfpool,
 evaluator correctness relies on synthetic known ground truth, and the public report does
-not describe a lazy fork as full historical-chain validation.
+not describe the snapshot as full historical-chain validation.
 
 The reviewed Jupiter snapshot is intentionally frozen at slot `433717382`. It is an old,
 route-specific 21-account fixture and cannot establish current liquidity, price, or router

@@ -431,8 +431,8 @@ deliverable.
   distributed execution claim.
 - All chain execution is local Surfpool. The harness does not test public-network
   inclusion or protect RPC/IP metadata.
-- The Jupiter fixture is a frozen lazy-fork snapshot at slot `433717382`; it proves the
-  reviewed route and signer-rebinding contract, not current market state.
+- The Jupiter fixture is an offline snapshot captured from a lazy fork at slot `433717382`;
+  it proves the reviewed route and signer-rebinding contract, not current market state.
 - Evaluator inputs and ownership labels are synthetic known ground truth. They validate
   the declared attacker implementation but do not model every proprietary analyst or the
   full distribution of human Solana behavior.

@@ -109,6 +109,8 @@ The draft PR remains draft until these pass from a clean checkout:
 | six process checkpoints | real child processes plus Surfpool | `SIGKILL`, reopen, exact submit/signature/state deltas, one terminal result |
 | historical rollback | runtime/store integration plus live re-audit | orphan correction never resubmits |
 | Surfpool restart | Surfpool soak | resume same database/Surfnet with no funding reset |
+| Surfpool profiler isolation | start/session provenance | instruction profiling disabled for sustained execution |
+| Surfpool datasource isolation | start/session provenance | offline snapshot mode; no lazy public-RPC account misses |
 | concurrent workers | runtime integration plus Surfpool soak | bounded workers and one wallet lease |
 | budget exhaustion | policy/property tests | no transaction signature beyond limit |
 | kill switch | CLI/runtime tests | no network, signer load, claim, or state change |

@@ -29,7 +29,7 @@ Options:
   -h, --help           Show this help
 
 The default is the canonical run: clean tree, 1,000-agent virtual soak, and
-1,000 real local Surfpool transactions. Nothing writes to a public RPC.
+1,000 real local Surfpool transactions. No chain RPC request leaves loopback.
 USAGE
 }
 
@@ -487,6 +487,7 @@ jq -n \
       cargo_audit: $cargo_audit_version,
       cargo_deny: $cargo_deny_version
     },
+    public_chain_rpc_reads: 0,
     public_network_writes: 0
   }' >"${output_dir}/run-metadata.json"
 

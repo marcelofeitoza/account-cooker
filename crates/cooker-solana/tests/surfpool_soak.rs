@@ -55,6 +55,7 @@ struct SurfpoolSession {
     started_at: String,
     binary_sha256: String,
     surfpool_version: String,
+    offline_mode: bool,
     rpc_url: String,
     ws_url: String,
     resumed_persistent_database: bool,
@@ -295,6 +296,7 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     };
     if let Some(session) = &session_before_restart {
         assert_eq!(session.schema_version, 2);
+        assert!(session.offline_mode);
         assert_eq!(session.persistent.surfnet_id, surfnet_id);
         assert_eq!(session.surfpool_version, surfpool_version);
     }
@@ -316,6 +318,8 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
         assert_eq!(before.persistent, after.persistent);
         assert_eq!(before.binary_sha256, after.binary_sha256);
         assert_eq!(before.surfpool_version, after.surfpool_version);
+        assert!(before.offline_mode);
+        assert_eq!(before.offline_mode, after.offline_mode);
         assert_eq!(before.rpc_url, after.rpc_url);
         assert_eq!(before.ws_url, after.ws_url);
         assert!(after.resumed_persistent_database);
@@ -577,6 +581,7 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
                 != provenance.after.process_start_identity,
             "persistent_identity_preserved": provenance.before.persistent == provenance.after.persistent,
             "network": provenance.after.persistent.network,
+            "offline_mode": provenance.after.offline_mode,
             "surfnet_id": provenance.after.persistent.surfnet_id,
             "database": "persistent-local-surfnet",
             "snapshot": "pinned-reviewed-state",
@@ -775,6 +780,7 @@ fn read_surfpool_session(path: &Path) -> Result<SurfpoolSession, Box<dyn std::er
         started_at: required_session_string(&value, "startedAt")?,
         binary_sha256: required_session_hash(&value, "binarySha256")?,
         surfpool_version: required_session_string(&value, "surfpoolVersion")?,
+        offline_mode: required_session_bool(&value, "offlineMode")?,
         rpc_url: required_session_string(&value, "rpcUrl")?,
         ws_url: required_session_string(&value, "wsUrl")?,
         resumed_persistent_database: required_session_bool(&value, "resumedPersistentDatabase")?,

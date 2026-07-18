@@ -134,7 +134,8 @@ jq -e --arg mode "${mode}" --arg commit "${git_commit}" --arg branch "${git_bran
   (["rustc", "cargo", "git", "surfpool", "solana", "solana_keygen", "jq", "shellcheck", "gitleaks",
     "cargo_audit", "cargo_deny"] - (.tools | keys) | length) == 0 and
   all(.tools[]; type == "string" and length > 0) and
-  .tools.gitleaks == "8.30.1" and .public_network_writes == 0 and
+  .tools.gitleaks == "8.30.1" and .public_chain_rpc_reads == 0 and
+  .public_network_writes == 0 and
   (if $mode == "canonical" then .source.git_dirty == false else true end)
   and (.tools.rustc | startswith("rustc 1.92.0 "))
   and (.tools.cargo | startswith("cargo 1.92.0 "))
@@ -692,6 +693,7 @@ jq -e --argjson expected "${expected_transactions}" --argjson concurrency "${exp
   .surfpool_restart_provenance.after.resumed_persistent_database == true and
   .surfpool_restart_provenance.after.effective_airdrop_lamports == 0 and
   .surfpool_restart_provenance.network == "mainnet" and
+  .surfpool_restart_provenance.offline_mode == true and
   .surfpool_restart_provenance.surfnet_id == .surfnet_id and
   .surfpool_restart_provenance.database == "persistent-local-surfnet" and
   .surfpool_restart_provenance.snapshot == "pinned-reviewed-state" and
@@ -714,12 +716,15 @@ jq -e --slurpfile initial "${raw_dir}/surfpool-initial-session.json" \
   ($soak[0]) as $soak |
   def schema_valid:
     .sessionSchemaVersion == 2 and .surfpoolVersion == "1.4.0" and
-    .network == "mainnet" and .host == "127.0.0.1" and
+    .network == "mainnet" and .offlineMode == true and .host == "127.0.0.1" and
     (.pid | type) == "number" and .pid > 0 and
     (.processStartIdentity | type) == "string" and (.processStartIdentity | length) > 0 and
     (.binarySha256 | test("^[0-9a-f]{64}$")) and
     (.snapshotArchiveSha256 | test("^[0-9a-f]{64}$")) and
     (.snapshotSha256 | test("^[0-9a-f]{64}$")) and
+    .instructionProfilingDisabled == true and
+    (.startArguments | index("--offline")) != null and
+    (.startArguments | index("--disable-instruction-profiling")) != null and
     .configuredAirdropLamports > 0;
   ($initial | schema_valid) and ($final | schema_valid) and ($chain | schema_valid) and
   $initial.resumedPersistentDatabase == false and
@@ -736,10 +741,12 @@ jq -e --slurpfile initial "${raw_dir}/surfpool-initial-session.json" \
   $soak.surfpool_restart_provenance.after.pid == $final.pid and
   $summary.surfpoolVersion == $final.surfpoolVersion and
   $summary.binarySha256 == $final.binarySha256 and $summary.network == $final.network and
+  $summary.offlineMode == true and
   $summary.surfnetId == $final.surfnetId and
   $summary.snapshotArchiveSha256 == $final.snapshotArchiveSha256 and
   $summary.snapshotSha256 == $final.snapshotSha256 and
   $summary.configuredAirdropLamports == $final.configuredAirdropLamports and
+  $summary.instructionProfilingDisabled == true and
   $summary.effectiveAirdropLamports == 0 and $summary.resumedPersistentDatabase == true and
   $chain.resumedPersistentDatabase == false and
   $chain.effectiveAirdropLamports == $chain.configuredAirdropLamports and
@@ -762,6 +769,7 @@ jq -n \
       pid: .pid,
       surfpool_version: .surfpoolVersion,
       network: .network,
+      offline_mode: .offlineMode,
       surfnet_id: .surfnetId,
       rpc: "http://127.0.0.1:<local>",
       websocket: "ws://127.0.0.1:<local>",
@@ -772,6 +780,7 @@ jq -n \
       snapshot_sha256: .snapshotSha256,
       configured_airdrop_lamports: .configuredAirdropLamports,
       effective_airdrop_lamports: .effectiveAirdropLamports,
+      instruction_profiling_disabled: .instructionProfilingDisabled,
       resumed_persistent_database: .resumedPersistentDatabase
     };
   {
@@ -996,6 +1005,7 @@ jq -n \
     },
     safety: {
       rpc_scope: "explicit-loopback-surfpool-only",
+      public_chain_rpc_reads: 0,
       public_network_writes: 0,
       signer_files_committed: false,
       raw_logs_committed: false,
@@ -1016,7 +1026,7 @@ jq -n \
       $metrics[0].limitation,
       "The evaluator uses synthetic labeled attacker scenarios; measured scores do not establish anonymity or mainnet behavior.",
       "Jupiter evidence replays a reviewed pinned Raydium CLMM state snapshot and does not claim current market execution quality.",
-      "Surfpool is a local lazy-fork topology and does not reproduce public-network latency, validator competition, or topology.",
+      "Surfpool is a local offline-snapshot topology and does not reproduce public-network latency, validator competition, or topology.",
       "Stake acceptance uses the native Solana stake lifecycle; Marinade is not implemented or claimed."
     ]
   }' >"${staging}/manifest.json"
