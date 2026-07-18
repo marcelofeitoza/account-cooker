@@ -86,7 +86,7 @@ jobs:
         run: cargo deny check --hide-inclusion-graph
       - name: Scan repository and history for secrets
         run: |
-          gitleaks dir --redact --no-banner --verbose .
+          ./scripts/gitleaks-working-tree.sh
           gitleaks git --redact --no-banner --verbose .
 
   surfpool:

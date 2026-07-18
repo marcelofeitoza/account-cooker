@@ -168,6 +168,11 @@ Controls:
 Mitigation: deterministic ActionId, unique constraint, persisted prepared transaction,
 stored signature, and mandatory unknown-outcome reconciliation.
 
+The recovery acceptance test pauses real child processes at six durable lifecycle
+boundaries, flushes a marker, sends `SIGKILL`, and recovers against the same SQLite database
+and Surfpool. This tests process loss without graceful cleanup; it does not simulate a
+whole-host disk failure.
+
 ### Stale blockhash
 
 Mitigation: validity tracking and safe replan only after the prior transaction is proven
@@ -192,6 +197,9 @@ resume against a different Surfnet state.
 
 Mitigation: manifest hashes, fixed seeds, version capture, command transcript, pre/post
 state assertions, and explicit separation of generated and reference data.
+
+Canonical results are not claimed until `evidence/final` exists for a clean commit and the
+full gate has passed twice from fresh clones and fresh Surfpool state.
 
 ## 11. Claim Language
 
@@ -220,5 +228,16 @@ Never permitted:
 
 Even a favorable report can miss proprietary analytics, network metadata, cross-chain
 identity, external service records, adaptive adversaries, and distribution shift.
+
+Additional fixed limitations are:
+
+- a common fleet funder remains directly observable;
+- attacker traces and controller labels are synthetic known ground truth, not a sample of
+  the complete human Solana population;
+- deterministic Jupiter proof uses a route-specific lazy-fork snapshot frozen at slot
+  `433717382`, not current market state;
+- coordination is one local controller, local signer files, SQLite, and loopback Surfpool,
+  not a distributed or public-network topology;
+- the stateful protocol path is native Solana stake, not Marinade.
 
 The contribution is a workload and measurement tool, not a guarantee of privacy.

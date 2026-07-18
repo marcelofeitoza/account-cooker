@@ -1,6 +1,7 @@
 # Surfpool Development Contract
 
-Status: implemented and exercised by the reduced full-demo rehearsal.
+Status: implemented. The expanded six-group acceptance matrix and canonical full-demo are
+release gates; no canonical evidence pack is claimed yet.
 
 Surfpool is mandatory for every chain-facing development, integration, recovery, and soak
 workflow in Account Cooker. Application transactions are locally signed and submitted to
@@ -129,8 +130,11 @@ It executes and records sanitized structured evidence for:
 1. native SOL transfer with exact principal and fee attribution;
 2. Jupiter exact-input SOL-to-USDC swap from reviewed state with signer rebinding;
 3. classic SPL transfer with ATA creation and later historical re-audit;
-4. native stake create/delegate/deactivate/withdraw lifecycle;
-5. simulation failure, stale-blockhash expiry, and same-signature unknown reconciliation.
+4. simulation failure, stale-blockhash expiry, insufficient-funds rejection, and
+   same-signature unknown-outcome reconciliation;
+5. six real child-process crash/restart checkpoints against Surfpool;
+6. native stake create/delegate/deactivate/withdraw lifecycle with exact phase deltas and
+   later confirmation re-audits.
 
 Native stake acceptance advances the Surfpool clock across epochs. It therefore runs last
 in the complete demo, after every persistent-restart proof. Moving a restarted node behind
@@ -155,9 +159,19 @@ database, and reconciles without resend. Acceptance requires:
 - zero failures, duplicates, budget violations, or unresolved Submitted/Unknown actions;
 - peak workers no greater than configured concurrency.
 
-The six-checkpoint process-crash matrix is an exhaustive SQLite runtime integration test
-with a deterministic chain gateway. The Surfpool soak separately supplies the real-chain
-response-loss and persistent-node-restart proof.
+The process-crash matrix runs six independent child processes against the real loopback
+Surfpool gateway. Each child persists a checkpoint marker and flushes it to disk; the
+parent then sends `SIGKILL`, independently inspects chain and SQLite state, and starts a
+second child against the same database. The checkpoints are after intent persistence,
+prepared-transaction persistence, simulation, local-signature persistence, send response
+loss, and confirmation before local promotion. It proves five confirmed actions, one
+unsubmitted expired signature, no duplicate submit attempt or local signature, one event
+trace per logical action, and exact principal-plus-fee balance deltas where a transaction
+landed.
+
+The 1,000-transaction soak supplies a separate aggregate proof: one injected response
+loss, one runtime reconstruction, one persistent Surfpool-process restart, and final
+reconciliation without resend.
 
 ## 8. Isolation And Secrets
 
@@ -177,6 +191,11 @@ Surfpool lazy cloning does not guarantee complete historical mainnet transaction
 Adapter fidelity therefore relies on fresh transactions executed inside Surfpool,
 evaluator correctness relies on synthetic known ground truth, and the public report does
 not describe a lazy fork as full historical-chain validation.
+
+The reviewed Jupiter snapshot is intentionally frozen at slot `433717382`. It is an old,
+route-specific 21-account fixture and cannot establish current liquidity, price, or router
+behavior. The harness is local and single-host; it does not test remote coordinators,
+multi-host stores, public RPC metadata, or mainnet inclusion.
 
 If a chain-facing path cannot be reproduced through Surfpool, it is incomplete. Direct
 devnet or mainnet testing is not a development fallback.

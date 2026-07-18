@@ -58,17 +58,28 @@ async fn native_stake_full_lifecycle_on_real_surfpool() -> Result<(), Box<dyn st
 
     let enter = stake_action(0, StakeOperation::Enter, principal, None, stake_rent);
     let stake_account = adapter.stake_account_for(&enter.id)?;
-    assert!(gateway.account(&stake_account).await?.is_none());
+    let enter_epoch_before = gateway.epoch_info().await?;
+    let payer_before_enter = gateway.balance(&payer).await?;
+    let stake_before_enter = gateway.account(&stake_account).await?;
+    assert!(stake_before_enter.is_none());
     let (enter_prepared, enter_receipt, enter_record) =
         execute(&gateway, &adapter, &context, &enter).await?;
     assert_success(&enter_receipt);
     assert!(enter_record.error.is_none());
+    assert_fee_within_policy(enter_record.fee);
+    let enter_epoch_after = gateway.epoch_info().await?;
+    let payer_after_enter = gateway.balance(&payer).await?;
     let entered_account = gateway
         .account(&stake_account)
         .await?
         .ok_or_else(|| io::Error::other("entered stake account is missing"))?;
     assert_eq!(entered_account.owner, STAKE_PROGRAM_ID);
     assert_eq!(entered_account.lamports, principal + stake_rent);
+    assert_eq!(
+        payer_before_enter,
+        payer_after_enter + principal + stake_rent + enter_record.fee,
+        "enter must debit exactly principal, rent, and the recorded transaction fee"
+    );
     let entered_state: StakeStateV2 = bincode::deserialize(&entered_account.data)?;
     assert_eq!(entered_state.authorized(), Some(Authorized::auto(&payer)));
     let entered_delegation = entered_state
@@ -77,22 +88,57 @@ async fn native_stake_full_lifecycle_on_real_surfpool() -> Result<(), Box<dyn st
     assert_eq!(entered_delegation.voter_pubkey, vote);
     assert_eq!(entered_delegation.stake, principal);
     assert_eq!(entered_delegation.deactivation_epoch, u64::MAX);
+    assert!(enter_epoch_after.epoch >= enter_epoch_before.epoch);
+    assert!(entered_delegation.activation_epoch >= enter_epoch_before.epoch);
+    assert!(entered_delegation.activation_epoch <= enter_epoch_after.epoch);
 
     let deactivate = stake_action(1, StakeOperation::Deactivate, 0, Some(stake_account), 0);
+    let deactivate_epoch_before = gateway.epoch_info().await?;
+    let payer_before_deactivate = gateway.balance(&payer).await?;
+    let stake_before_deactivate = gateway
+        .account(&stake_account)
+        .await?
+        .ok_or_else(|| io::Error::other("stake account disappeared before deactivation"))?;
     let (deactivate_prepared, deactivate_receipt, deactivate_record) =
         execute(&gateway, &adapter, &context, &deactivate).await?;
     assert_success(&deactivate_receipt);
     assert!(deactivate_record.error.is_none());
+    assert_fee_within_policy(deactivate_record.fee);
+    let deactivate_epoch_after = gateway.epoch_info().await?;
+    let payer_after_deactivate = gateway.balance(&payer).await?;
     let deactivated_account = gateway
         .account(&stake_account)
         .await?
         .ok_or_else(|| io::Error::other("deactivated stake account is missing"))?;
+    assert_eq!(stake_before_deactivate.lamports, principal + stake_rent);
     assert_eq!(deactivated_account.lamports, principal + stake_rent);
+    assert_eq!(
+        stake_before_deactivate.lamports, deactivated_account.lamports,
+        "deactivation must not move stake principal or rent"
+    );
+    assert_eq!(
+        payer_before_deactivate,
+        payer_after_deactivate + deactivate_record.fee,
+        "deactivation must debit only the recorded transaction fee"
+    );
     let deactivated_state: StakeStateV2 = bincode::deserialize(&deactivated_account.data)?;
+    assert_eq!(
+        deactivated_state.authorized(),
+        Some(Authorized::auto(&payer))
+    );
     let deactivated_delegation = deactivated_state
         .delegation()
         .ok_or_else(|| io::Error::other("deactivated stake account lost delegation metadata"))?;
+    assert_eq!(deactivated_delegation.voter_pubkey, vote);
+    assert_eq!(deactivated_delegation.stake, principal);
+    assert_eq!(
+        deactivated_delegation.activation_epoch,
+        entered_delegation.activation_epoch
+    );
     assert_ne!(deactivated_delegation.deactivation_epoch, u64::MAX);
+    assert!(deactivate_epoch_after.epoch >= deactivate_epoch_before.epoch);
+    assert!(deactivated_delegation.deactivation_epoch >= deactivate_epoch_before.epoch);
+    assert!(deactivated_delegation.deactivation_epoch <= deactivate_epoch_after.epoch);
 
     let before_travel = gateway.epoch_info().await?;
     let target_epoch = before_travel
@@ -103,19 +149,32 @@ async fn native_stake_full_lifecycle_on_real_surfpool() -> Result<(), Box<dyn st
     let after_travel = gateway.time_travel_to_epoch(target_epoch).await?;
     assert_eq!(after_travel.epoch, target_epoch);
     assert!(after_travel.absolute_slot > before_travel.absolute_slot);
+    assert!(after_travel.epoch > deactivated_delegation.deactivation_epoch);
 
+    let withdraw_epoch_before = gateway.epoch_info().await?;
     let payer_before_withdraw = gateway.balance(&payer).await?;
+    let stake_before_withdraw = gateway
+        .account(&stake_account)
+        .await?
+        .ok_or_else(|| io::Error::other("inactive stake account is missing before withdrawal"))?;
+    assert_eq!(stake_before_withdraw.lamports, principal + stake_rent);
     let withdraw = stake_action(2, StakeOperation::Withdraw, 0, Some(stake_account), 0);
     let (withdraw_prepared, withdraw_receipt, withdraw_record) =
         execute(&gateway, &adapter, &context, &withdraw).await?;
     assert_success(&withdraw_receipt);
     assert!(withdraw_record.error.is_none());
-    assert!(gateway.account(&stake_account).await?.is_none());
+    assert_fee_within_policy(withdraw_record.fee);
+    let withdraw_epoch_after = gateway.epoch_info().await?;
+    let stake_after_withdraw = gateway.account(&stake_account).await?;
+    assert!(stake_after_withdraw.is_none());
     let payer_after_withdraw = gateway.balance(&payer).await?;
     assert_eq!(
         payer_after_withdraw,
-        payer_before_withdraw + principal + stake_rent - withdraw_record.fee
+        payer_before_withdraw + stake_before_withdraw.lamports - withdraw_record.fee,
+        "withdrawal must return the entire stake account minus the recorded transaction fee"
     );
+    assert!(withdraw_epoch_before.epoch >= target_epoch);
+    assert!(withdraw_epoch_after.epoch >= withdraw_epoch_before.epoch);
 
     let lifecycle_signatures = [
         Signature::from_str(&enter_prepared.signature)?,
@@ -174,6 +233,56 @@ async fn native_stake_full_lifecycle_on_real_surfpool() -> Result<(), Box<dyn st
         "enter_fee_lamports": enter_record.fee,
         "deactivate_fee_lamports": deactivate_record.fee,
         "withdraw_fee_lamports": withdraw_record.fee,
+        "phases": {
+            "enter": {
+                "state_before": "absent",
+                "state_after": "active",
+                "payer_before_lamports": payer_before_enter,
+                "payer_after_lamports": payer_after_enter,
+                "stake_before_lamports": 0,
+                "stake_after_lamports": entered_account.lamports,
+                "principal_lamports": principal,
+                "rent_lamports": stake_rent,
+                "fee_lamports": enter_record.fee,
+                "epoch_before": enter_epoch_before.epoch,
+                "epoch_after": enter_epoch_after.epoch,
+                "activation_epoch": entered_delegation.activation_epoch,
+                "deactivation_epoch": null,
+            },
+            "deactivate": {
+                "state_before": "active",
+                "state_after": "deactivating",
+                "payer_before_lamports": payer_before_deactivate,
+                "payer_after_lamports": payer_after_deactivate,
+                "stake_before_lamports": stake_before_deactivate.lamports,
+                "stake_after_lamports": deactivated_account.lamports,
+                "fee_lamports": deactivate_record.fee,
+                "epoch_before": deactivate_epoch_before.epoch,
+                "epoch_after": deactivate_epoch_after.epoch,
+                "activation_epoch": deactivated_delegation.activation_epoch,
+                "deactivation_epoch": deactivated_delegation.deactivation_epoch,
+            },
+            "epoch_travel": {
+                "state_before": "deactivating",
+                "state_after": "inactive",
+                "epoch_before": before_travel.epoch,
+                "slot_before": before_travel.absolute_slot,
+                "target_epoch": target_epoch,
+                "epoch_after": after_travel.epoch,
+                "slot_after": after_travel.absolute_slot,
+            },
+            "withdraw": {
+                "state_before": "inactive",
+                "state_after": "closed",
+                "payer_before_lamports": payer_before_withdraw,
+                "payer_after_lamports": payer_after_withdraw,
+                "stake_before_lamports": stake_before_withdraw.lamports,
+                "stake_after_lamports": 0,
+                "fee_lamports": withdraw_record.fee,
+                "epoch_before": withdraw_epoch_before.epoch,
+                "epoch_after": withdraw_epoch_after.epoch,
+            },
+        },
         "post_lifecycle_confirmation_reaudits": 3,
         "post_lifecycle_resubmissions": 0,
         "postconditions_met": enter_receipt.postconditions_met
@@ -185,6 +294,17 @@ async fn native_stake_full_lifecycle_on_real_surfpool() -> Result<(), Box<dyn st
     });
     println!("COOKER_STAKE_EVIDENCE={evidence}");
     Ok(())
+}
+
+fn assert_fee_within_policy(fee_lamports: u64) {
+    assert!(
+        fee_lamports > 0,
+        "Surfpool transaction fee must be non-zero"
+    );
+    assert!(
+        fee_lamports <= MAX_FEE_LAMPORTS,
+        "recorded fee {fee_lamports} exceeds the action policy ceiling {MAX_FEE_LAMPORTS}"
+    );
 }
 
 fn sanitize_signature(signature: &impl ToString) -> String {

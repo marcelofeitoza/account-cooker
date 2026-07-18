@@ -1,13 +1,14 @@
 # Validation And Evidence Plan
 
-Status: implemented acceptance contract; reduced full-demo rehearsal passed, canonical
-clean-clone evidence pending.
+Status: executable acceptance contract implemented; the canonical clean-tree run, two
+fresh-clone repetitions, and committed `evidence/final` pack are pending. Reduced or
+focused runs cannot be cited as canonical results.
 
 ## 1. Quality Gates
 
 The draft PR remains draft until these pass from a clean checkout:
 
-    cargo fmt --all --check
+    cargo fmt --all -- --check
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
     cargo test --locked --workspace --all-features
     cargo test --locked --workspace --doc
@@ -15,7 +16,7 @@ The draft PR remains draft until these pass from a clean checkout:
     shellcheck -x -P SCRIPTDIR scripts/*.sh scripts/lib/*.sh
     cargo audit
     cargo deny check
-    gitleaks dir --redact --no-banner --verbose .
+    ./scripts/gitleaks-working-tree.sh
     gitleaks git --redact --no-banner --verbose .
     ./scripts/surfpool-chain-acceptance.sh
     ./scripts/full-demo.sh
@@ -105,7 +106,7 @@ The draft PR remains draft until these pass from a clean checkout:
 | stale blockhash | Surfpool fault acceptance | same-signature expiry/reconciliation, no blind rebuild |
 | simulation failure | Surfpool fault acceptance | no send attempted |
 | response lost after send | Surfpool soak | one landed signature recovered without resend |
-| six process checkpoints | SQLite runtime integration | restart reaches one valid terminal result |
+| six process checkpoints | real child processes plus Surfpool | `SIGKILL`, reopen, exact submit/signature/state deltas, one terminal result |
 | historical rollback | runtime/store integration plus live re-audit | orphan correction never resubmits |
 | Surfpool restart | Surfpool soak | resume same database/Surfnet with no funding reset |
 | concurrent workers | runtime integration plus Surfpool soak | bounded workers and one wallet lease |
@@ -119,7 +120,7 @@ The draft PR remains draft until these pass from a clean checkout:
 
 - 1,000 agents;
 - 30 virtual days;
-- at least five master seeds;
+- exactly the five canonical seeds `11`, `23`, `37`, `51`, and `71`;
 - same agent definitions for baseline and modeled planner;
 - deterministic output hash for each seed;
 - bounded task count and streaming trace output;
@@ -129,7 +130,7 @@ The draft PR remains draft until these pass from a clean checkout:
 
 - representative fleet subset for wall-clock operation;
 - at least 1,000 locally executed native transactions in the canonical faulted soak;
-- separate native, SPL, Jupiter, stake, and fault transactions in chain acceptance;
+- separate native, SPL, Jupiter, fault, process-recovery, and stake acceptance groups;
 - restart and fault injection during the run;
 - zero duplicate logical intents;
 - zero budget violations;
@@ -147,7 +148,7 @@ Compare:
 - persona/session planner;
 - one mitigation removed at a time.
 
-Use at least five held-out seeds and equal:
+Use the five held-out seeds `11`, `23`, `37`, `51`, and `71`, with equal:
 
 - controller groups;
 - agents;
@@ -172,31 +173,34 @@ fail the claim gate while the runtime still passes its engineering gates.
 
 ## 6. Recovery Proof
 
-The SQLite runtime integration suite injects failures at:
+The Surfpool process-recovery integration test starts a separate child for each checkpoint:
 
 1. after intent persistence;
-2. after simulation;
-3. after prepared transaction persistence;
+2. after prepared transaction persistence;
+3. after simulation;
 4. after local signature creation;
 5. after send response is lost;
 6. after confirmation but before local promotion.
 
-For each checkpoint it closes and reopens the same database, then:
+For every case, the parent waits for a flushed checkpoint marker, sends `SIGKILL`, and
+independently inspects the persisted store and Surfpool state. A second child then reopens
+the same database and executes or reconciles. The gate requires:
 
-- stop the cooker without cleanup;
-- preserve the application database;
-- restart the runtime;
-- execute or reconcile according to the persisted state;
-- assert one logical ActionId;
-- assert zero or one landed signature as appropriate;
-- record the event sequence.
+- exactly one logical ActionId, prepared record, simulation, submission record, and trace;
+- five confirmed actions with one landed signature and exact principal-plus-fee deltas;
+- one locally signed but never submitted action that expires only after its last valid
+  block height is crossed;
+- exact crash-side and recovery-side submit-attempt counts;
+- reuse of the same persisted prepared bytes and signature where they existed before the
+  crash;
+- zero duplicate local signatures and zero unresolved actions.
 
-This exhaustive checkpoint proof uses a deterministic in-process chain boundary so every
-side-effect window is reachable. The real Surfpool soak separately injects one response
-loss only after the submitted signature is observable, reconstructs the runtime, restarts
-Surfpool against the same persistent database, reconciles without resend, and proves exact
-aggregate principal plus fee deltas. The full demo also re-audits every confirmed CLI
-action without submitting another transaction.
+The independent Surfpool soak separately injects one response loss only after the submitted
+signature is observable, reconstructs the runtime, restarts Surfpool against the same
+persistent database, reconciles without resend, and proves exact aggregate principal plus
+fee deltas. The full demo also re-audits every confirmed CLI action without submitting
+another transaction. Native stake acceptance runs after both recovery proofs because its
+epoch travel must be last on the independent chain-acceptance node.
 
 ## 7. Evidence Layout
 
@@ -206,18 +210,21 @@ Canonical committed layout:
       README.md
       final/
         manifest.json
+        run.json
+        executions.json
+        quality-gates.json
         cli-workflow.json
         transactions.json
         virtual-soak.json
         surfpool-soak.json
-        surfpool-session.json
+        surfpool-provenance.json
         report.md
         metrics.json
         metrics.csv
         metrics.md
         test-summary.txt
-        config.redacted.toml
-        commands.txt
+        config.executed.toml
+        reproduce.txt
         checksums.txt
 
 manifest.json includes:
@@ -232,6 +239,7 @@ manifest.json includes:
 - config, model, fixture, and seed hashes;
 - test results;
 - sanitized local transaction signature samples;
+- six chain-acceptance groups, including all six real-process crash cases;
 - metric artifact hashes;
 - known limitations.
 
@@ -281,3 +289,8 @@ The PR can leave draft only after:
 - unsupported privacy claims are absent;
 - sponsor eligibility questions are resolved;
 - Marcelo approves final submission.
+
+The external eligibility blocker is specific: the listing reports `HUMAN_ONLY`, but the
+available listing text does not establish whether a human entrant may submit AI-assisted
+implementation. Sponsor confirmation is required; local completion does not imply
+eligibility.

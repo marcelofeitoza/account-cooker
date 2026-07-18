@@ -2,6 +2,10 @@
 
 Status: implemented architecture; canonical release evidence is pending.
 
+This repository is a standalone clean-room implementation. It has no source, fixture,
+service, key, data, or runtime dependency on Cloak; anything conceptually similar was
+implemented inside this workspace from public interfaces.
+
 ## 1. System Shape
 
 Account Cooker separates pure behavior planning from durable orchestration, Solana
@@ -98,7 +102,8 @@ Owns orchestration:
 - Bounded worker pool and per-wallet exclusivity.
 - Retry classification and backoff.
 - Unknown-outcome reconciliation.
-- Graceful shutdown and crash-injection checkpoints.
+- Graceful shutdown and durable lifecycle checkpoints used by the subprocess recovery
+  harness.
 - Structured events and runtime counters.
 
 ### cooker-eval
@@ -336,6 +341,12 @@ All blockhashes, account reads, simulations, sends, signature status, and transa
 receipts use this gateway. Off-chain quote APIs may be contacted through adapter-specific
 clients, but they never submit transactions.
 
+Canonical Jupiter acceptance does not depend on current pool movement. It verifies a
+compressed 21-account Surfpool snapshot and reviewed quote/instruction fixture, removes
+the fixture signer, and changes exactly three account identities: the signer and its WSOL
+and USDC associated token accounts. The transaction is rebuilt with a current Surfpool
+blockhash and a fresh local signer before simulation and submission.
+
 ## 12. Evaluation Boundary
 
 Runtime events contain:
@@ -404,9 +415,25 @@ about unlimited scale.
 - Postgres Store for multiple hosts.
 - Remote/KMS signer providers.
 - Additional stateful protocol adapters.
+- Marinade staking or unstaking. The shipped stateful path is native Solana stake and is
+  not represented as a Marinade integration.
 - Versioned observed-traffic calibrators.
 - Coordinator API and authenticated worker leases.
 - More sophisticated attacker models.
 
 These are extension points, not implied capabilities or completion gates for this bounty
 deliverable.
+
+## 16. Architecture Limits
+
+- Coordination and durability are single-host: one controller, local signer files, and
+  one SQLite WAL database. The worker bound scales local concurrency; it is not a
+  distributed execution claim.
+- All chain execution is local Surfpool. The harness does not test public-network
+  inclusion or protect RPC/IP metadata.
+- The Jupiter fixture is a frozen lazy-fork snapshot at slot `433717382`; it proves the
+  reviewed route and signer-rebinding contract, not current market state.
+- Evaluator inputs and ownership labels are synthetic known ground truth. They validate
+  the declared attacker implementation but do not model every proprietary analyst or the
+  full distribution of human Solana behavior.
+- A shared fleet funder remains directly visible in the transaction graph.

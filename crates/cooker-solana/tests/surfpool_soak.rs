@@ -1,5 +1,7 @@
 //! Durable compressed soak against real local Surfpool transactions.
 
+#![recursion_limit = "256"]
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs, io,
@@ -33,6 +35,39 @@ const DEFAULT_TRANSACTION_COUNT: usize = 1_000;
 const TRANSFER_LAMPORTS: u64 = 1_000_000;
 const MAX_FEE_LAMPORTS: u64 = 10_000;
 const MODEL_VERSION: &str = "surfpool-compressed-soak-v1";
+const SIGNATURE_SAMPLE_LIMIT: usize = 12;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PersistentSurfpoolIdentity {
+    network: String,
+    surfnet_id: String,
+    database: String,
+    snapshot: String,
+    snapshot_archive_sha256: String,
+    snapshot_sha256: String,
+}
+
+#[derive(Clone, Debug)]
+struct SurfpoolSession {
+    schema_version: u64,
+    pid: u64,
+    process_start_identity: String,
+    started_at: String,
+    binary_sha256: String,
+    surfpool_version: String,
+    rpc_url: String,
+    ws_url: String,
+    resumed_persistent_database: bool,
+    configured_airdrop_lamports: u64,
+    effective_airdrop_lamports: u64,
+    persistent: PersistentSurfpoolIdentity,
+}
+
+#[derive(Clone, Debug)]
+struct SurfpoolRestartProvenance {
+    before: SurfpoolSession,
+    after: SurfpoolSession,
+}
 
 #[derive(Debug, Default)]
 struct LoseOneSendResponse {
@@ -154,6 +189,8 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
 
     let rpc_url =
         std::env::var("COOKER_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8899".to_owned());
+    let surfnet_id = std::env::var("COOKER_SURFNET_ID")
+        .map_err(|_| io::Error::other("COOKER_SURFNET_ID is required for soak store identity"))?;
     let signer_path = std::env::var_os("COOKER_SIGNER_PATH").map_or_else(
         || project_root.join(".surfpool/keys/funder.json"),
         PathBuf::from,
@@ -162,6 +199,7 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     let gateway = Arc::new(SurfpoolGateway::connect(endpoint.clone()).await?);
     let signer = Arc::new(LocalKeypair::load(&project_root, &signer_path)?);
     let funder = signer.pubkey();
+    let funder_address = funder.to_string();
     let funder_before = gateway.balance(&funder).await?;
     let surfpool_version = gateway.identity().surfnet_version.clone();
 
@@ -181,7 +219,7 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
 
     let store = Arc::new(Store::open(
         &database_path,
-        StoreIdentity::surfpool("noise-dev-soak")?,
+        StoreIdentity::surfpool(&surfnet_id)?,
     )?);
     assert_eq!(store.journal_mode()?.to_ascii_lowercase(), "wal");
     store.register_run(&RunRegistration {
@@ -245,18 +283,58 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     drop(signer);
     drop(gateway);
 
-    let surfpool_restarts = if std::env::var_os("COOKER_SOAK_RESTART_SURFPOOL").is_some() {
+    let restart_requested = std::env::var_os("COOKER_SOAK_RESTART_SURFPOOL").is_some();
+    let session_path = std::env::var_os("SURFPOOL_SESSION_FILE").map_or_else(
+        || project_root.join(".surfpool/session.json"),
+        PathBuf::from,
+    );
+    let session_before_restart = if restart_requested {
+        Some(read_surfpool_session(&session_path)?)
+    } else {
+        None
+    };
+    if let Some(session) = &session_before_restart {
+        assert_eq!(session.schema_version, 2);
+        assert_eq!(session.persistent.surfnet_id, surfnet_id);
+        assert_eq!(session.surfpool_version, surfpool_version);
+    }
+
+    let surfpool_restarts = if restart_requested {
         restart_surfpool(&project_root)?;
         1
     } else {
         0
     };
+    let restart_provenance = if let Some(before) = session_before_restart {
+        let after = read_surfpool_session(&session_path)?;
+        assert_eq!(after.schema_version, 2);
+        assert_ne!(before.pid, after.pid, "Surfpool restart reused the old PID");
+        assert_ne!(
+            before.process_start_identity, after.process_start_identity,
+            "Surfpool restart did not change process-start identity"
+        );
+        assert_eq!(before.persistent, after.persistent);
+        assert_eq!(before.binary_sha256, after.binary_sha256);
+        assert_eq!(before.surfpool_version, after.surfpool_version);
+        assert_eq!(before.rpc_url, after.rpc_url);
+        assert_eq!(before.ws_url, after.ws_url);
+        assert!(after.resumed_persistent_database);
+        assert_eq!(after.effective_airdrop_lamports, 0);
+        assert_eq!(
+            before.configured_airdrop_lamports,
+            after.configured_airdrop_lamports
+        );
+        Some(SurfpoolRestartProvenance { before, after })
+    } else {
+        None
+    };
+    assert_eq!(usize::from(restart_provenance.is_some()), surfpool_restarts);
 
     let gateway = Arc::new(SurfpoolGateway::connect(endpoint).await?);
     let signer = Arc::new(LocalKeypair::load(&project_root, &signer_path)?);
     let store = Arc::new(Store::open(
         &database_path,
-        StoreIdentity::surfpool("noise-dev-soak")?,
+        StoreIdentity::surfpool(&surfnet_id)?,
     )?);
     store.verify_integrity()?;
     let second_runtime = runtime(
@@ -333,6 +411,8 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     let mut signature_samples = Vec::new();
     let mut total_fees = 0_u64;
     let mut journal_events = 0_usize;
+    let mut exact_source_debits = 0_usize;
+    let mut exact_destination_credits = 0_usize;
     for action in &actions {
         match store.action_state(&action.id)? {
             ActionState::Confirmed => confirmed += 1,
@@ -353,7 +433,7 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
         if !signatures.insert(submission.signature.clone()) {
             duplicate_signatures += 1;
         }
-        if signature_samples.len() < 12 {
+        if signature_samples.len() < SIGNATURE_SAMPLE_LIMIT {
             signature_samples.push(sanitize_signature(&submission.signature));
         }
         let receipt = recovery
@@ -396,6 +476,24 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
         {
             return Err(io::Error::other("destination state delta was not exact").into());
         }
+        exact_destination_credits += 1;
+        let exact_debit = TRANSFER_LAMPORTS
+            .checked_add(fee)
+            .ok_or_else(|| io::Error::other("per-transaction debit overflow"))?;
+        let source_observation = receipt
+            .observations
+            .iter()
+            .find(|observation| {
+                observation.kind == "native_source_balance_delta"
+                    && observation.account == funder_address
+            })
+            .ok_or_else(|| io::Error::other("receipt omitted source state delta"))?;
+        if source_observation.attributes.get("actual_delta") != Some(&format!("-{exact_debit}"))
+            || source_observation.attributes.get("met").map(String::as_str) != Some("true")
+        {
+            return Err(io::Error::other("source state delta was not exact").into());
+        }
+        exact_source_debits += 1;
         let usage = store.budget_usage(action.agent_id, Utc::now())?;
         let action_ceiling = TRANSFER_LAMPORTS + MAX_FEE_LAMPORTS;
         if usage.spent_today_lamports > action_ceiling
@@ -411,12 +509,20 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     assert_eq!(budget_violations, 0);
     assert_eq!(unresolved_submitted, 0);
     assert_eq!(unresolved_unknown, 0);
+    assert_eq!(
+        signature_samples.len(),
+        transaction_count.min(SIGNATURE_SAMPLE_LIMIT)
+    );
+    assert_eq!(exact_source_debits, transaction_count);
+    assert_eq!(exact_destination_credits, transaction_count);
 
+    let mut destination_total_lamports = 0_u64;
     for destination in &destinations {
-        assert_eq!(
-            gateway.native_balance(destination).await?,
-            TRANSFER_LAMPORTS
-        );
+        let destination_balance = gateway.native_balance(destination).await?;
+        assert_eq!(destination_balance, TRANSFER_LAMPORTS);
+        destination_total_lamports = destination_total_lamports
+            .checked_add(destination_balance)
+            .ok_or_else(|| io::Error::other("destination balance total overflow"))?;
     }
     let funder_after = gateway.balance(&funder).await?;
     let total_transferred = u64::try_from(transaction_count)?
@@ -426,6 +532,7 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
         .checked_sub(funder_after)
         .ok_or_else(|| io::Error::other("soak payer balance unexpectedly increased"))?;
     assert_eq!(payer_debit, total_transferred + total_fees);
+    assert_eq!(destination_total_lamports, total_transferred);
     let global_budget_ceiling = u64::try_from(transaction_count)?
         .checked_mul(TRANSFER_LAMPORTS + MAX_FEE_LAMPORTS)
         .ok_or_else(|| io::Error::other("global budget overflow"))?;
@@ -447,10 +554,43 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     assert_eq!(failures, 0);
     let wall_time_ms = u64::try_from(wall_started.elapsed().as_millis())?;
     let database_bytes = fs::metadata(&database_path)?.len();
+    assert!(database_bytes > 0);
+    assert!(journal_events > 0);
+    let restart_evidence = restart_provenance.map(|provenance| {
+        json!({
+            "verified": true,
+            "session_schema_version": provenance.before.schema_version,
+            "before": {
+                "pid": provenance.before.pid,
+                "started_at": provenance.before.started_at,
+                "resumed_persistent_database": provenance.before.resumed_persistent_database,
+                "effective_airdrop_lamports": provenance.before.effective_airdrop_lamports,
+            },
+            "after": {
+                "pid": provenance.after.pid,
+                "started_at": provenance.after.started_at,
+                "resumed_persistent_database": provenance.after.resumed_persistent_database,
+                "effective_airdrop_lamports": provenance.after.effective_airdrop_lamports,
+            },
+            "pid_changed": provenance.before.pid != provenance.after.pid,
+            "process_start_identity_changed": provenance.before.process_start_identity
+                != provenance.after.process_start_identity,
+            "persistent_identity_preserved": provenance.before.persistent == provenance.after.persistent,
+            "network": provenance.after.persistent.network,
+            "surfnet_id": provenance.after.persistent.surfnet_id,
+            "database": "persistent-local-surfnet",
+            "snapshot": "pinned-reviewed-state",
+            "snapshot_archive_sha256": provenance.after.persistent.snapshot_archive_sha256,
+            "snapshot_sha256": provenance.after.persistent.snapshot_sha256,
+            "binary_sha256": provenance.after.binary_sha256,
+            "surfpool_version": provenance.after.surfpool_version,
+        })
+    });
     let evidence = json!({
         "schema_version": 1,
         "scenario": "compressed_surfpool_native_transfer_soak",
         "surfpool_version": surfpool_version,
+        "surfnet_id": surfnet_id,
         "rpc": "http://127.0.0.1:<local>",
         "wall_time_ms": wall_time_ms,
         "transaction_count": transaction_count,
@@ -458,6 +598,7 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
         "confirmed_action_count": confirmed,
         "failures": failures,
         "duplicate_logical_intents": 0,
+        "duplicate_enqueue_attempts": transaction_count,
         "idempotent_duplicate_enqueue_rejections": idempotent_enqueue_rejections,
         "duplicate_signatures": duplicate_signatures,
         "budget_violations": budget_violations,
@@ -468,10 +609,15 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
         "response_loss_reconciled_without_resend": reconciled,
         "runtime_stack_restarts": 1,
         "surfpool_process_restarts": surfpool_restarts,
+        "surfpool_restart_provenance": restart_evidence,
         "max_concurrency": max_concurrency,
         "peak_worker_count": peak_workers,
         "journal_event_count": journal_events,
         "database_bytes": database_bytes,
+        "signature_sample_count": signature_samples.len(),
+        "signature_sample_limit": SIGNATURE_SAMPLE_LIMIT,
+        "exact_source_debit_count": exact_source_debits,
+        "exact_destination_credit_count": exact_destination_credits,
         "state_delta": {
             "payer_before_lamports": funder_before,
             "payer_after_lamports": funder_after,
@@ -480,6 +626,9 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
             "fees_lamports": total_fees,
             "destination_accounts": transaction_count,
             "each_destination_delta_lamports": TRANSFER_LAMPORTS,
+            "destination_total_lamports": destination_total_lamports,
+            "payer_equation_met": payer_debit == total_transferred + total_fees,
+            "destination_equation_met": destination_total_lamports == total_transferred,
         },
         "sanitized_signature_samples": signature_samples,
         "database_file": database_path.file_name().map(|value| value.to_string_lossy()),
@@ -599,6 +748,79 @@ fn sanitize_signature(signature: &str) -> String {
         &signature[..10],
         &signature[signature.len() - 10..]
     )
+}
+
+fn read_surfpool_session(path: &Path) -> Result<SurfpoolSession, Box<dyn std::error::Error>> {
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "failed to read Surfpool session {}: {error}",
+                path.display()
+            ),
+        )
+    })?)?;
+    let persistent = PersistentSurfpoolIdentity {
+        network: required_session_string(&value, "network")?,
+        surfnet_id: required_session_string(&value, "surfnetId")?,
+        database: required_session_string(&value, "database")?,
+        snapshot: required_session_string(&value, "snapshot")?,
+        snapshot_archive_sha256: required_session_hash(&value, "snapshotArchiveSha256")?,
+        snapshot_sha256: required_session_hash(&value, "snapshotSha256")?,
+    };
+    Ok(SurfpoolSession {
+        schema_version: required_session_u64(&value, "sessionSchemaVersion")?,
+        pid: required_session_u64(&value, "pid")?,
+        process_start_identity: required_session_string(&value, "processStartIdentity")?,
+        started_at: required_session_string(&value, "startedAt")?,
+        binary_sha256: required_session_hash(&value, "binarySha256")?,
+        surfpool_version: required_session_string(&value, "surfpoolVersion")?,
+        rpc_url: required_session_string(&value, "rpcUrl")?,
+        ws_url: required_session_string(&value, "wsUrl")?,
+        resumed_persistent_database: required_session_bool(&value, "resumedPersistentDatabase")?,
+        configured_airdrop_lamports: required_session_u64(&value, "configuredAirdropLamports")?,
+        effective_airdrop_lamports: required_session_u64(&value, "effectiveAirdropLamports")?,
+        persistent,
+    })
+}
+
+fn required_session_value<'a>(
+    value: &'a serde_json::Value,
+    field: &str,
+) -> Result<&'a serde_json::Value, io::Error> {
+    value
+        .get(field)
+        .ok_or_else(|| io::Error::other(format!("Surfpool session omitted {field}")))
+}
+
+fn required_session_string(value: &serde_json::Value, field: &str) -> Result<String, io::Error> {
+    required_session_value(value, field)?
+        .as_str()
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| io::Error::other(format!("Surfpool session has invalid {field}")))
+}
+
+fn required_session_hash(value: &serde_json::Value, field: &str) -> Result<String, io::Error> {
+    let hash = required_session_string(value, field)?;
+    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(io::Error::other(format!(
+            "Surfpool session has invalid {field}"
+        )));
+    }
+    Ok(hash.to_ascii_lowercase())
+}
+
+fn required_session_u64(value: &serde_json::Value, field: &str) -> Result<u64, io::Error> {
+    required_session_value(value, field)?
+        .as_u64()
+        .ok_or_else(|| io::Error::other(format!("Surfpool session has invalid {field}")))
+}
+
+fn required_session_bool(value: &serde_json::Value, field: &str) -> Result<bool, io::Error> {
+    required_session_value(value, field)?
+        .as_bool()
+        .ok_or_else(|| io::Error::other(format!("Surfpool session has invalid {field}")))
 }
 
 fn restart_surfpool(project_root: &Path) -> Result<(), Box<dyn std::error::Error>> {

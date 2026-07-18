@@ -38,6 +38,8 @@ zeroize = "1.8.2"
 [dev-dependencies]
 cooker-runtime = { version = "0.1.0", path = "../cooker-runtime" }
 cooker-store = { version = "0.1.0", path = "../cooker-store" }
+hex.workspace = true
+solana-sha256-hasher = "3.1.0"
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "net"] }
 wiremock = "0.6.5"

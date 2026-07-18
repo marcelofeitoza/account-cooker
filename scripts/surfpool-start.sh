@@ -20,6 +20,7 @@ existing_pid="$(surfpool_read_pid || true)"
 if [[ -n "${existing_pid}" ]]; then
   if surfpool_pid_matches "${existing_pid}"; then
     surfpool_verify_rpc
+    surfpool_verify_runtime_env
     surfpool_note "Surfpool is already running (pid ${existing_pid}) at ${SURFPOOL_RPC_URL}"
     exit 0
   fi
@@ -68,24 +69,9 @@ cargo run \
   >/dev/null || surfpool_die "failed to load or generate local funder keypair"
 surfpool_write_runtime_env
 
-command=(
-  "${SURFPOOL_BIN}" start
-  --network "${SURFPOOL_NETWORK}"
-  --host "${SURFPOOL_HOST}"
-  --port "${SURFPOOL_PORT}"
-  --ws-port "${SURFPOOL_WS_PORT}"
-  --studio-port "${SURFPOOL_STUDIO_PORT}"
-  --no-deploy
-  --no-tui
-  --no-studio
-  --snapshot "${SURFPOOL_SNAPSHOT_FILE}"
-  --db "${SURFPOOL_DB}"
-  --surfnet-id "${SURFPOOL_ID}"
-  --airdrop-keypair-path "${SURFPOOL_KEYPAIR}"
-  --airdrop-amount "${effective_airdrop_lamports}"
-  --max-profiles "${SURFPOOL_MAX_PROFILES}"
-  --log-path "${SURFPOOL_LOG_DIR}"
-)
+surfpool_build_start_command "${effective_airdrop_lamports}" ||
+  surfpool_die "invalid effective Surfpool airdrop amount"
+command=("${SURFPOOL_START_COMMAND[@]}")
 
 {
   printf '\n[%s] launching:' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -95,14 +81,25 @@ command=(
 
 ready=0
 pid=''
+launched_process_start_identity=''
 cleanup_startup() {
-  local status=$?
+  local current_pid current_start_identity status=$?
   trap - EXIT INT TERM
   if ((ready == 0)) && [[ -n "${pid}" ]]; then
     if surfpool_pid_is_live "${pid}"; then
-      kill -TERM "${pid}" 2>/dev/null || true
+      current_start_identity="$(surfpool_process_start_identity "${pid}" 2>/dev/null || true)"
+      if [[ -n "${launched_process_start_identity}" && \
+        "${current_start_identity}" == "${launched_process_start_identity}" ]] &&
+        surfpool_process_matches_start_command "${pid}" "${effective_airdrop_lamports}"; then
+        kill -TERM "${pid}" 2>/dev/null || true
+      else
+        surfpool_warn "launched PID changed identity; refusing to signal ${pid} during cleanup"
+      fi
     fi
-    rm -f "${SURFPOOL_PID_FILE}"
+    current_pid="$(surfpool_read_pid || true)"
+    if [[ "${current_pid}" == "${pid}" ]]; then
+      rm -f "${SURFPOOL_PID_FILE}"
+    fi
     surfpool_warn "Surfpool did not become ready; see ${SURFPOOL_LAUNCHER_LOG}"
   fi
   exit "${status}"
@@ -114,6 +111,8 @@ trap 'exit 143' TERM
 nohup env -u SURFPOOL_DATASOURCE_RPC_URL "${command[@]}" \
   </dev/null >>"${SURFPOOL_LAUNCHER_LOG}" 2>&1 &
 pid=$!
+launched_process_start_identity="$(surfpool_process_start_identity "${pid}")" ||
+  surfpool_die "failed to identify the launched Surfpool process"
 
 pid_temp="${SURFPOOL_PID_FILE}.tmp.$$"
 printf '%s\n' "${pid}" >"${pid_temp}"
@@ -129,6 +128,8 @@ fi
 
 surfpool_verify_rpc
 surfpool_write_session "${pid}" "${effective_airdrop_lamports}" "${resumed_persistent_database}"
+surfpool_pid_matches "${pid}" || surfpool_die "Surfpool process ownership verification failed"
+surfpool_verify_runtime_env
 ready=1
 trap - EXIT INT TERM
 

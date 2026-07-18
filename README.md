@@ -6,9 +6,11 @@ wallet-clustering attacks. It treats privacy as an empirical systems problem: th
 must survive faults without duplicate execution, and the evaluator must report failed
 privacy hypotheses as plainly as successful ones.
 
-> Status: the complete implementation passes the reduced end-to-end rehearsal. The
-> canonical clean-tree evidence run and two fresh-clone verification runs are the remaining
-> engineering release gates. The upstream pull request remains a draft.
+> Status: the implementation and executable release gates are present. No canonical
+> evidence pack has been produced yet; the clean-tree canonical run and two fresh-clone
+> verification runs remain release gates. The upstream pull request remains a draft, and
+> sponsor confirmation that a human may submit AI-assisted work under `HUMAN_ONLY` is still
+> required before submission.
 
 ## What Ships
 
@@ -17,6 +19,9 @@ privacy hypotheses as plainly as successful ones.
 - SQLite WAL persistence with migrations, atomic leases, deterministic action IDs,
   immutable journals, persisted signed transactions, historical confirmation audits, and
   unknown-outcome reconciliation.
+- A real subprocess recovery matrix that pauses at six durable lifecycle boundaries,
+  force-terminates each child with `SIGKILL`, reopens the same SQLite database, and proves
+  exact submit, signature, event, and balance outcomes against Surfpool.
 - A fail-closed Surfpool gateway and local signer boundary. Network validation happens
   before a signer is loaded or mutable runtime state is opened.
 - Locally signed native SOL, classic SPL, Jupiter exact-input, and native stake lifecycle
@@ -41,6 +46,12 @@ volume, governance voting, referral or airdrop farming, NFT manipulation, dust s
 bridge churn, or deceptive multi-hop funding. Every chain transaction in development and
 evidence runs executes only inside loopback Surfpool.
 
+The current topology is one local controller, one SQLite store, local signer files, and
+one loopback Surfpool process. The stateful adapter is native Solana stake, not Marinade.
+Deterministic Jupiter evidence uses a reviewed lazy-fork snapshot captured at a fixed slot;
+its age and limited account set make it reproducible, not representative of current market
+state.
+
 ## Reproduce It
 
 The pinned environment is:
@@ -49,7 +60,7 @@ The pinned environment is:
 - Surfpool `1.4.0`;
 - Agave CLI `3.1.8` for `solana-keygen`;
 - `bash`, `curl`, `gzip`, `jq`, `lsof`, and `shellcheck`;
-- `cargo-audit 0.22.1`, `cargo-deny 0.20.2`, and Gitleaks for the complete gate.
+- `cargo-audit 0.22.1`, `cargo-deny 0.20.2`, and Gitleaks `8.30.1` for the complete gate.
 
 Run the reduced rehearsal while developing:
 
@@ -65,9 +76,11 @@ Run the canonical proof from a clean Git tree:
 
 The canonical command runs all Rust and shell quality gates, supply-chain and secret
 scans, a release build, the full CLI lifecycle, the five-seed evaluator, a deterministic
-1,000-agent by 30-day virtual soak, a faulted 1,000-transaction Surfpool soak, and five
-adapter/fault acceptance scenarios. It starts and stops only its own isolated Surfpool
-process and never writes to a public RPC.
+1,000-agent by 30-day virtual soak, a faulted 1,000-transaction Surfpool soak, and six
+acceptance groups: native SOL, reviewed-state Jupiter, classic SPL, fault reconciliation,
+the six-checkpoint process-crash matrix, and native stake. Stake runs last because it
+advances Surfpool across epochs. The demo uses fresh, isolated Surfpool state and never
+writes to a public RPC.
 
 ## CLI
 
@@ -103,8 +116,9 @@ was loaded and whether state changed, making the safety boundary machine-verifia
 | `cooker-cli` | configuration, operator commands, virtual soak, evidence-facing output |
 
 The implementation is clean-room MIT code based on the bounty specification and public
-Solana, Surfpool, Jupiter, Raydium, and SPL interfaces. It has no code, service, data,
-fixture, key, or runtime dependency on another private project.
+Solana, Surfpool, Jupiter, Raydium, and SPL interfaces. It is standalone from Cloak and has
+no code, service, data, fixture, key, or runtime dependency on Cloak or another private
+project.
 
 ## Evidence
 

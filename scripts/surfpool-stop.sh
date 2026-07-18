@@ -25,7 +25,7 @@ if ! surfpool_pid_is_live "${pid}"; then
 fi
 
 surfpool_pid_matches "${pid}" ||
-  surfpool_die "PID ${pid} does not match the Surfpool process started by this harness"
+  surfpool_die "PID ${pid} is not bound to this harness command and session identity"
 
 kill -TERM "${pid}"
 deadline=$((SECONDS + SURFPOOL_STOP_TIMEOUT_SECONDS))
@@ -38,6 +38,12 @@ if surfpool_pid_is_live "${pid}"; then
     surfpool_die "PID ${pid} changed identity while stopping; refusing SIGKILL"
   surfpool_warn "Surfpool did not stop after ${SURFPOOL_STOP_TIMEOUT_SECONDS}s; sending SIGKILL"
   kill -KILL "${pid}"
+  kill_deadline=$((SECONDS + 5))
+  while surfpool_pid_is_live "${pid}" && ((SECONDS < kill_deadline)); do
+    sleep 0.25
+  done
+  surfpool_pid_is_live "${pid}" &&
+    surfpool_die "Surfpool PID ${pid} remained live after SIGKILL"
 fi
 
 rm -f "${SURFPOOL_PID_FILE}"

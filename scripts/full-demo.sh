@@ -4,9 +4,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 run_token="$(date -u '+%Y%m%dT%H%M%SZ')-$$"
+run_started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+original_arguments=("$@")
 mode=canonical
 output_dir=''
 evidence_dir=''
+command_counter=0
+readonly RUST_EXPECTED_VERSION=1.92.0
+readonly AGAVE_EXPECTED_VERSION=3.1.8
+readonly CARGO_AUDIT_EXPECTED_VERSION=0.22.1
+readonly CARGO_DENY_EXPECTED_VERSION=0.20.2
+readonly GITLEAKS_EXPECTED_VERSION=8.30.1
 
 usage() {
   cat <<'USAGE'
@@ -87,11 +95,23 @@ esac
 [[ ! -e "${output_dir}" ]] || die "raw output already exists: ${output_dir}"
 [[ ! -e "${evidence_dir}" ]] || die "evidence output already exists: ${evidence_dir}"
 
-for command in awk bash cargo cp date git gitleaks jq lsof sed shellcheck tee; do
+for command in awk bash cargo cp date git gitleaks jq lsof rustc sed shellcheck solana solana-keygen tar tee; do
   require_command "${command}"
 done
-cargo audit --version >/dev/null 2>&1 || die "cargo-audit is required"
-cargo deny --version >/dev/null 2>&1 || die "cargo-deny is required"
+[[ "$(rustc --version | awk '{print $2}')" == "${RUST_EXPECTED_VERSION}" ]] ||
+  die "Rust ${RUST_EXPECTED_VERSION} is required"
+[[ "$(cargo --version | awk '{print $2}')" == "${RUST_EXPECTED_VERSION}" ]] ||
+  die "Cargo ${RUST_EXPECTED_VERSION} is required"
+[[ "$(solana --version)" == "solana-cli ${AGAVE_EXPECTED_VERSION} "* ]] ||
+  die "Agave solana-cli ${AGAVE_EXPECTED_VERSION} is required"
+[[ "$(solana-keygen --version)" == "solana-keygen ${AGAVE_EXPECTED_VERSION} "* ]] ||
+  die "Agave solana-keygen ${AGAVE_EXPECTED_VERSION} is required"
+[[ "$(gitleaks version)" == "${GITLEAKS_EXPECTED_VERSION}" ]] ||
+  die "Gitleaks ${GITLEAKS_EXPECTED_VERSION} is required"
+[[ "$(cargo audit --version | awk '{print $NF}')" == "${CARGO_AUDIT_EXPECTED_VERSION}" ]] ||
+  die "cargo-audit ${CARGO_AUDIT_EXPECTED_VERSION} is required"
+[[ "$(cargo deny --version | awk '{print $NF}')" == "${CARGO_DENY_EXPECTED_VERSION}" ]] ||
+  die "cargo-deny ${CARGO_DENY_EXPECTED_VERSION} is required"
 
 if [[ "${mode}" == canonical ]]; then
   [[ -z "$(git -C "${PROJECT_ROOT}" status --short --untracked-files=all)" ]] ||
@@ -106,23 +126,42 @@ else
   planning_limit=1000
   soak_transactions=25
 fi
+source_commit="$(git -C "${PROJECT_ROOT}" rev-parse HEAD)"
+source_branch="$(git -C "${PROJECT_ROOT}" symbolic-ref --short -q HEAD || printf detached)"
+if [[ -n "$(git -C "${PROJECT_ROOT}" status --short --untracked-files=all)" ]]; then
+  source_dirty=true
+else
+  source_dirty=false
+fi
 
-export SURFPOOL_HOME="${SURFPOOL_HOME:-${PROJECT_ROOT}/.surfpool}"
-export SURFPOOL_KEYPAIR="${SURFPOOL_KEYPAIR:-${SURFPOOL_HOME}/keys/full-demo-${run_token}.json}"
-export SURFPOOL_DB="${SURFPOOL_DB:-${SURFPOOL_HOME}/state/full-demo-${run_token}.sqlite}"
-export SURFPOOL_PID_FILE="${SURFPOOL_PID_FILE:-${SURFPOOL_HOME}/full-demo-${run_token}.pid}"
-export SURFPOOL_SESSION_FILE="${SURFPOOL_SESSION_FILE:-${SURFPOOL_HOME}/full-demo-${run_token}-session.json}"
-export SURFPOOL_RUNTIME_ENV="${SURFPOOL_RUNTIME_ENV:-${SURFPOOL_HOME}/full-demo-${run_token}-runtime.env}"
-export SURFPOOL_LAUNCHER_LOG="${SURFPOOL_LAUNCHER_LOG:-${SURFPOOL_HOME}/logs/full-demo-${run_token}.log}"
+export SURFPOOL_HOME="${PROJECT_ROOT}/.surfpool"
+export SURFPOOL_KEYPAIR="${SURFPOOL_HOME}/keys/full-demo-${run_token}.json"
+export SURFPOOL_DB="${SURFPOOL_HOME}/state/full-demo-${run_token}.sqlite"
+export SURFPOOL_PID_FILE="${SURFPOOL_HOME}/full-demo-${run_token}.pid"
+export SURFPOOL_SESSION_FILE="${SURFPOOL_HOME}/full-demo-${run_token}-session.json"
+export SURFPOOL_RUNTIME_ENV="${SURFPOOL_HOME}/full-demo-${run_token}-runtime.env"
+export SURFPOOL_LAUNCHER_LOG="${SURFPOOL_HOME}/logs/full-demo-${run_token}.log"
 export SURFPOOL_PORT="${SURFPOOL_PORT:-18899}"
 export SURFPOOL_WS_PORT="${SURFPOOL_WS_PORT:-18900}"
 export SURFPOOL_STUDIO_PORT="${SURFPOOL_STUDIO_PORT:-19488}"
-export SURFPOOL_ID="${SURFPOOL_ID:-noise-full-demo-${run_token}}"
+export SURFPOOL_ID="noise-full-demo-${run_token}"
 
 # shellcheck source=lib/surfpool-common.sh
 source "${SCRIPT_DIR}/lib/surfpool-common.sh"
 
-mkdir -p "${output_dir}/quality" "${output_dir}/cli" "${output_dir}/config"
+for fresh_path in \
+  "${SURFPOOL_KEYPAIR}" "${SURFPOOL_DB}" "${SURFPOOL_PID_FILE}" \
+  "${SURFPOOL_SESSION_FILE}" "${SURFPOOL_RUNTIME_ENV}" "${SURFPOOL_LAUNCHER_LOG}"; do
+  [[ ! -e "${fresh_path}" ]] || die "run-specific Surfpool state already exists: ${fresh_path}"
+done
+for local_port in "${SURFPOOL_PORT}" "${SURFPOOL_WS_PORT}" "${SURFPOOL_STUDIO_PORT}"; do
+  ! lsof -nP -iTCP:"${local_port}" -sTCP:LISTEN >/dev/null 2>&1 ||
+    die "isolated Surfpool port already has a listener: ${local_port}"
+done
+
+mkdir -p \
+  "${output_dir}/quality" "${output_dir}/cli" "${output_dir}/config" \
+  "${output_dir}/commands"
 started_here=0
 cleanup() {
   local status=$?
@@ -137,11 +176,47 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 run_capture() {
-  local label="$1"
-  local output="$2"
+  local argv_json ended_at exit_status label manifest output output_relative started_at stderr_relative
+  label="$1"
+  output="$2"
   shift 2
+  command_counter=$((command_counter + 1))
+  manifest="${output_dir}/commands/$(printf '%03d' "${command_counter}").json"
+  output_relative="${output#"${output_dir}/"}"
+  stderr_relative="${output_relative}.stderr.log"
+  started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  argv_json="$(jq -cn --args '$ARGS.positional' -- "$@")"
   printf '\n[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "${label}" | tee -a "${output_dir}/run.log"
+  set +e
   "$@" >"${output}" 2>"${output}.stderr.log"
+  exit_status=$?
+  set -e
+  ended_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  jq -n \
+    --argjson sequence "${command_counter}" \
+    --arg label "${label}" \
+    --arg started_at "${started_at}" \
+    --arg ended_at "${ended_at}" \
+    --argjson argv "${argv_json}" \
+    --arg stdout_file "${output_relative}" \
+    --arg stderr_file "${stderr_relative}" \
+    --arg stdout_sha256 "$(surfpool_file_sha256 "${output}")" \
+    --arg stderr_sha256 "$(surfpool_file_sha256 "${output}.stderr.log")" \
+    --argjson exit_status "${exit_status}" \
+    '{
+      schema_version: 1,
+      sequence: $sequence,
+      label: $label,
+      started_at: $started_at,
+      ended_at: $ended_at,
+      argv: $argv,
+      stdout_file: $stdout_file,
+      stderr_file: $stderr_file,
+      stdout_sha256: $stdout_sha256,
+      stderr_sha256: $stderr_sha256,
+      exit_status: $exit_status
+    }' >"${manifest}"
+  ((exit_status == 0)) || return "${exit_status}"
 }
 
 cd "${PROJECT_ROOT}"
@@ -166,7 +241,7 @@ run_capture "Rust advisory audit" "${output_dir}/quality/cargo-audit.log" \
 run_capture "Dependency policy" "${output_dir}/quality/cargo-deny.log" \
   cargo deny check
 run_capture "Repository secret scan" "${output_dir}/quality/gitleaks-dir.log" \
-  gitleaks dir --redact --no-banner --verbose .
+  "${SCRIPT_DIR}/gitleaks-working-tree.sh"
 run_capture "Git history secret scan" "${output_dir}/quality/gitleaks-git.log" \
   gitleaks git --redact --no-banner --verbose .
 run_capture "Release build" "${output_dir}/quality/release-build.log" \
@@ -196,6 +271,12 @@ started_here=1
 run_capture "Start isolated Surfpool" "${output_dir}/surfpool-start.txt" \
   "${SCRIPT_DIR}/surfpool-start.sh"
 surfpool_verify_runtime_env
+cp "${SURFPOOL_SESSION_FILE}" "${output_dir}/surfpool-initial-session.json"
+jq -e --arg surfnet_id "${SURFPOOL_ID}" --arg database "${SURFPOOL_DB}" '
+  .sessionSchemaVersion == 2 and .surfnetId == $surfnet_id and .database == $database and
+  .resumedPersistentDatabase == false
+' "${output_dir}/surfpool-initial-session.json" >/dev/null ||
+  die "initial Surfpool session did not prove a fresh database"
 
 demo_root="${SURFPOOL_HOME}/workspaces/full-demo-${run_token}"
 demo_key_dir="${demo_root}/.surfpool/keys"
@@ -325,18 +406,104 @@ if [[ "${mode}" == quick ]]; then surfpool_soak_arguments+=(--quick); fi
 run_capture "${mode} Surfpool transaction soak" "${output_dir}/surfpool-soak-command.txt" \
   "${SCRIPT_DIR}/surfpool-soak.sh" "${surfpool_soak_arguments[@]}"
 
-# Native stake acceptance advances Surfpool epochs. Keep that irreversible clock change after
-# every restart proof so a subsequent node bootstrap cannot reconnect behind a future transaction.
+cp "${SURFPOOL_SESSION_FILE}" "${output_dir}/surfpool-final-session.json"
+jq -e --arg surfnet_id "${SURFPOOL_ID}" --arg database "${SURFPOOL_DB}" '
+  .sessionSchemaVersion == 2 and .surfnetId == $surfnet_id and .database == $database and
+  .resumedPersistentDatabase == true
+' "${output_dir}/surfpool-final-session.json" >/dev/null ||
+  die "post-soak Surfpool session did not prove persistent restart state"
+
+run_capture "Stop primary isolated Surfpool" "${output_dir}/surfpool-stop.txt" \
+  "${SCRIPT_DIR}/surfpool-stop.sh"
+started_here=0
+
+export SURFPOOL_KEYPAIR="${SURFPOOL_HOME}/keys/chain-${run_token}.json"
+export SURFPOOL_DB="${SURFPOOL_HOME}/state/chain-${run_token}.sqlite"
+export SURFPOOL_PID_FILE="${SURFPOOL_HOME}/chain-${run_token}.pid"
+export SURFPOOL_SESSION_FILE="${SURFPOOL_HOME}/chain-${run_token}-session.json"
+export SURFPOOL_RUNTIME_ENV="${SURFPOOL_HOME}/chain-${run_token}-runtime.env"
+export SURFPOOL_LAUNCHER_LOG="${SURFPOOL_HOME}/logs/chain-${run_token}.log"
+export SURFPOOL_ID="noise-chain-${run_token}"
+for fresh_path in \
+  "${SURFPOOL_KEYPAIR}" "${SURFPOOL_DB}" "${SURFPOOL_PID_FILE}" \
+  "${SURFPOOL_SESSION_FILE}" "${SURFPOOL_RUNTIME_ENV}" "${SURFPOOL_LAUNCHER_LOG}"; do
+  [[ ! -e "${fresh_path}" ]] || die "chain acceptance state already exists: ${fresh_path}"
+done
+
+# Native stake acceptance advances Surfpool epochs, so the chain matrix owns a fresh node and
+# runs stake last. The chain script starts and stops this node itself.
 run_capture "Complete Surfpool chain acceptance" "${output_dir}/chain-console.txt" \
   env COOKER_CHAIN_EVIDENCE_LOG="${output_dir}/chain-acceptance.log" \
   "${SCRIPT_DIR}/surfpool-chain-acceptance.sh"
 
-run_capture "Stop isolated Surfpool" "${output_dir}/surfpool-stop.txt" \
-  "${SCRIPT_DIR}/surfpool-stop.sh"
-started_here=0
+cp "${SURFPOOL_SESSION_FILE}" "${output_dir}/chain-surfpool-session.json"
+jq -e --arg surfnet_id "${SURFPOOL_ID}" --arg database "${SURFPOOL_DB}" '
+  .sessionSchemaVersion == 2 and .surfnetId == $surfnet_id and .database == $database and
+  .resumedPersistentDatabase == false
+' "${output_dir}/chain-surfpool-session.json" >/dev/null ||
+  die "chain acceptance session did not prove fresh independent state"
+
+original_arguments_json="$(jq -cn --args '$ARGS.positional' -- "${original_arguments[@]}")"
+jq -n \
+  --arg run_id "${run_token}" \
+  --arg mode "${mode}" \
+  --arg started_at "${run_started_at}" \
+  --arg finished_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  --arg source_commit "${source_commit}" \
+  --arg source_branch "${source_branch}" \
+  --argjson source_dirty "${source_dirty}" \
+  --argjson arguments "${original_arguments_json}" \
+  --argjson command_count "${command_counter}" \
+  --arg rustc_version "$(rustc -Vv)" \
+  --arg cargo_version "$(cargo -V)" \
+  --arg git_version "$(git --version)" \
+  --arg surfpool_version "$(surfpool --version)" \
+  --arg solana_version "$(solana --version)" \
+  --arg solana_keygen_version "$(solana-keygen --version)" \
+  --arg jq_version "$(jq --version)" \
+  --arg shellcheck_version "$(shellcheck --version | awk 'NR == 2 {print $2}')" \
+  --arg gitleaks_version "$(gitleaks version)" \
+  --arg cargo_audit_version "$(cargo audit --version)" \
+  --arg cargo_deny_version "$(cargo deny --version)" \
+  '{
+    schema_version: 1,
+    run_id: $run_id,
+    mode: $mode,
+    started_at: $started_at,
+    finished_at: $finished_at,
+    source: {git_commit: $source_commit, git_branch: $source_branch, git_dirty: $source_dirty},
+    invocation: {program: "scripts/full-demo.sh", arguments: $arguments},
+    command_count: $command_count,
+    tools: {
+      rustc: $rustc_version,
+      cargo: $cargo_version,
+      git: $git_version,
+      surfpool: $surfpool_version,
+      solana: $solana_version,
+      solana_keygen: $solana_keygen_version,
+      jq: $jq_version,
+      shellcheck: $shellcheck_version,
+      gitleaks: $gitleaks_version,
+      cargo_audit: $cargo_audit_version,
+      cargo_deny: $cargo_deny_version
+    },
+    public_network_writes: 0
+  }' >"${output_dir}/run-metadata.json"
 
 "${SCRIPT_DIR}/build-evidence-pack.sh" \
   --raw-dir "${output_dir}" --output-dir "${evidence_dir}" --mode "${mode}"
+
+(
+  cd "${evidence_dir}"
+  while read -r expected_digest relative_file; do
+    [[ -n "${expected_digest}" && -n "${relative_file}" ]] ||
+      die "malformed evidence checksum entry"
+    actual_digest="$(surfpool_file_sha256 "${relative_file}")"
+    [[ "${actual_digest}" == "${expected_digest}" ]] ||
+      die "evidence checksum mismatch after publication: ${relative_file}"
+  done <checksums.txt
+)
+gitleaks dir --redact --no-banner --config "${PROJECT_ROOT}/.gitleaks.toml" "${evidence_dir}"
 
 trap - EXIT INT TERM
 printf '\nFull demo passed (%s).\n' "${mode}"

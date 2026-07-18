@@ -32,9 +32,10 @@ run_gate() {
 }
 
 require_marker() {
-  local marker="$1"
-  if ! grep -Fq "${marker}" "${evidence_log}"; then
-    surfpool_die "acceptance output omitted required evidence marker: ${marker}"
+  local count marker="$1"
+  count="$(grep -Fc "${marker}" "${evidence_log}" || true)"
+  if [[ "${count}" != "1" ]]; then
+    surfpool_die "acceptance output must contain exactly one evidence marker (${count} found): ${marker}"
   fi
 }
 
@@ -97,20 +98,26 @@ run_gate "Classic SPL transfer with ATA creation" \
   cargo test --locked -p cooker-solana --test surfpool_spl_live \
   classic_spl_adapter_proves_creation_transfer_and_exact_overhead -- --ignored --nocapture
 
-run_gate "Native stake full lifecycle" \
-  cargo test --locked -p cooker-solana --test surfpool_stake_live \
-  native_stake_full_lifecycle_on_real_surfpool -- --ignored --nocapture
-
 run_gate "Failure and same-signature reconciliation" \
   cargo test --locked -p cooker-solana --test surfpool_faults_live \
   stale_insufficient_simulation_and_lost_response_reconcile_on_surfpool \
   -- --ignored --nocapture
+
+run_gate "Six real-process crash and restart checkpoints" \
+  cargo test --locked -p cooker-solana --test surfpool_process_recovery \
+  every_process_crash_checkpoint_recovers_on_real_surfpool \
+  -- --ignored --exact --nocapture
+
+run_gate "Native stake full lifecycle" \
+  cargo test --locked -p cooker-solana --test surfpool_stake_live \
+  native_stake_full_lifecycle_on_real_surfpool -- --ignored --nocapture
 
 require_marker "COOKER_NATIVE_EVIDENCE="
 require_marker "COOKER_SPL_EVIDENCE="
 require_marker "COOKER_STAKE_EVIDENCE="
 require_marker "COOKER_FAULT_EVIDENCE="
 require_marker "COOKER_JUPITER_EVIDENCE="
+require_marker "COOKER_PROCESS_RECOVERY_EVIDENCE="
 require_marker '"healthy": true'
 require_marker '"signer_loaded": false'
 require_marker '"state_changed": false'

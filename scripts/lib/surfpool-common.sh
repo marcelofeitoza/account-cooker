@@ -49,6 +49,7 @@ SURFPOOL_SNAPSHOT_ARCHIVE="${PROJECT_ROOT}/${SURFPOOL_SNAPSHOT_ARCHIVE_RELATIVE}
 SURFPOOL_SNAPSHOT_FILE="${SURFPOOL_STATE_DIR}/jupiter-reviewed.snapshot.json"
 SURFPOOL_RPC_URL="http://${SURFPOOL_HOST}:${SURFPOOL_PORT}"
 SURFPOOL_WS_URL="ws://${SURFPOOL_HOST}:${SURFPOOL_WS_PORT}"
+SURFPOOL_START_COMMAND=()
 
 surfpool_note() {
   printf '%s\n' "$*"
@@ -236,13 +237,177 @@ surfpool_pid_is_live() {
   kill -0 "$1" 2>/dev/null
 }
 
-surfpool_pid_matches() {
+surfpool_build_start_command() {
+  local effective_airdrop_lamports="$1"
+
+  surfpool_is_uint "${effective_airdrop_lamports}" || return 1
+  SURFPOOL_START_COMMAND=(
+    "${SURFPOOL_BIN}" start
+    --network "${SURFPOOL_NETWORK}"
+    --host "${SURFPOOL_HOST}"
+    --port "${SURFPOOL_PORT}"
+    --ws-port "${SURFPOOL_WS_PORT}"
+    --studio-port "${SURFPOOL_STUDIO_PORT}"
+    --no-deploy
+    --no-tui
+    --no-studio
+    --snapshot "${SURFPOOL_SNAPSHOT_FILE}"
+    --db "${SURFPOOL_DB}"
+    --surfnet-id "${SURFPOOL_ID}"
+    --airdrop-keypair-path "${SURFPOOL_KEYPAIR}"
+    --airdrop-amount "${effective_airdrop_lamports}"
+    --max-profiles "${SURFPOOL_MAX_PROFILES}"
+    --log-path "${SURFPOOL_LOG_DIR}"
+  )
+}
+
+surfpool_join_command_line() {
+  local argument separator=''
+
+  for argument in "$@"; do
+    case "${argument}" in
+      *$'\n'* | *$'\r'*) return 1 ;;
+    esac
+    printf '%s%s' "${separator}" "${argument}"
+    separator=' '
+  done
+  printf '\n'
+}
+
+surfpool_process_command_line() {
   local pid="$1"
   local command_line
 
+  command_line="$(LC_ALL=C ps -ww -p "${pid}" -o command= 2>/dev/null)" || return 1
+  command_line="${command_line#"${command_line%%[![:space:]]*}"}"
+  command_line="${command_line%"${command_line##*[![:space:]]}"}"
+  [[ -n "${command_line}" ]] || return 1
+  printf '%s\n' "${command_line}"
+}
+
+surfpool_process_start_identity() {
+  local pid="$1"
+  local boot_id process_stat process_stat_tail process_start
+
+  if [[ -r "/proc/${pid}/stat" && -r /proc/sys/kernel/random/boot_id ]]; then
+    IFS= read -r process_stat <"/proc/${pid}/stat" || return 1
+    process_stat_tail="${process_stat##*) }"
+    # Linux stat field 22 is the process start tick; the tail begins at field 3.
+    # shellcheck disable=SC2086
+    set -- ${process_stat_tail}
+    (($# >= 20)) || return 1
+    process_start="${20}"
+    IFS= read -r boot_id </proc/sys/kernel/random/boot_id || return 1
+    [[ -n "${boot_id}" && "${process_start}" =~ ^[0-9]+$ ]] || return 1
+    printf 'linux:%s:%s\n' "${boot_id}" "${process_start}"
+    return 0
+  fi
+
+  process_start="$(LC_ALL=C ps -p "${pid}" -o lstart= 2>/dev/null)" || return 1
+  process_start="$(awk '{$1=$1; print}' <<<"${process_start}")"
+  [[ -n "${process_start}" ]] || return 1
+  printf 'ps-lstart:%s\n' "${process_start}"
+}
+
+surfpool_start_arguments_json() {
+  jq -cn --args '$ARGS.positional' -- "$@"
+}
+
+surfpool_process_matches_start_command() {
+  local pid="$1"
+  local effective_airdrop_lamports="$2"
+  local actual_command_line actual_sha256 expected_command_line
+
   surfpool_pid_is_live "${pid}" || return 1
-  command_line="$(ps -p "${pid}" -o command= 2>/dev/null)" || return 1
-  [[ "${command_line}" == "${SURFPOOL_BIN} start "* || "${command_line}" == "${SURFPOOL_BIN} start" ]]
+  [[ -x "${SURFPOOL_BIN}" ]] || return 1
+  actual_sha256="$(surfpool_file_sha256 "${SURFPOOL_BIN}")" || return 1
+  [[ "${actual_sha256}" == "${SURFPOOL_EXPECTED_SHA256}" ]] || return 1
+  surfpool_build_start_command "${effective_airdrop_lamports}" || return 1
+  expected_command_line="$(surfpool_join_command_line "${SURFPOOL_START_COMMAND[@]}")" || return 1
+  actual_command_line="$(surfpool_process_command_line "${pid}")" || return 1
+  [[ "${actual_command_line}" == "${expected_command_line}" ]]
+}
+
+surfpool_pid_matches() {
+  local pid="$1"
+  local actual_command_line actual_sha256 configured_airdrop_lamports effective_airdrop_lamports
+  local expected_command_line process_start_identity start_arguments
+
+  surfpool_pid_is_live "${pid}" || return 1
+  [[ -r "${SURFPOOL_SESSION_FILE}" ]] || return 1
+  effective_airdrop_lamports="$(jq -er '
+    .effectiveAirdropLamports |
+    select(type == "number" and . == floor and . >= 0) |
+    tostring
+  ' "${SURFPOOL_SESSION_FILE}" 2>/dev/null)" || return 1
+  surfpool_process_matches_start_command "${pid}" "${effective_airdrop_lamports}" || return 1
+
+  process_start_identity="$(surfpool_process_start_identity "${pid}")" || return 1
+  actual_command_line="$(surfpool_process_command_line "${pid}")" || return 1
+  expected_command_line="$(surfpool_join_command_line "${SURFPOOL_START_COMMAND[@]}")" || return 1
+  [[ "${actual_command_line}" == "${expected_command_line}" ]] || return 1
+  start_arguments="$(surfpool_start_arguments_json "${SURFPOOL_START_COMMAND[@]}")" || return 1
+  actual_sha256="$(surfpool_file_sha256 "${SURFPOOL_BIN}")" || return 1
+  configured_airdrop_lamports="${SURFPOOL_AIRDROP_LAMPORTS}"
+
+  jq -e \
+    --argjson expectedPid "${pid}" \
+    --arg processStartIdentity "${process_start_identity}" \
+    --arg binary "${SURFPOOL_BIN}" \
+    --arg binarySha256 "${actual_sha256}" \
+    --arg surfpoolVersion "${SURFPOOL_EXPECTED_VERSION}" \
+    --arg network "${SURFPOOL_NETWORK}" \
+    --arg host "${SURFPOOL_HOST}" \
+    --argjson rpcPort "${SURFPOOL_PORT}" \
+    --argjson websocketPort "${SURFPOOL_WS_PORT}" \
+    --argjson studioPort "${SURFPOOL_STUDIO_PORT}" \
+    --arg surfnetId "${SURFPOOL_ID}" \
+    --arg rpcUrl "${SURFPOOL_RPC_URL}" \
+    --arg wsUrl "${SURFPOOL_WS_URL}" \
+    --arg database "${SURFPOOL_DB}" \
+    --arg snapshot "${SURFPOOL_SNAPSHOT_FILE}" \
+    --arg airdropKeypair "${SURFPOOL_KEYPAIR}" \
+    --argjson configuredAirdropLamports "${configured_airdrop_lamports}" \
+    --argjson effectiveAirdropLamports "${effective_airdrop_lamports}" \
+    --argjson maxProfiles "${SURFPOOL_MAX_PROFILES}" \
+    --arg logPath "${SURFPOOL_LOG_DIR}" \
+    --arg snapshotArchiveSha256 "${SURFPOOL_SNAPSHOT_ARCHIVE_SHA256}" \
+    --arg snapshotSha256 "${SURFPOOL_SNAPSHOT_SHA256}" \
+    --arg processCommandLine "${actual_command_line}" \
+    --argjson startArguments "${start_arguments}" '
+      .sessionSchemaVersion == 2 and
+      .pid == $expectedPid and
+      .processStartIdentity == $processStartIdentity and
+      .binary == $binary and
+      .binarySha256 == $binarySha256 and
+      .surfpoolVersion == $surfpoolVersion and
+      .network == $network and
+      .host == $host and
+      .rpcPort == $rpcPort and
+      .websocketPort == $websocketPort and
+      .studioPort == $studioPort and
+      .surfnetId == $surfnetId and
+      .rpcUrl == $rpcUrl and
+      .wsUrl == $wsUrl and
+      .database == $database and
+      .snapshot == $snapshot and
+      .airdropKeypair == $airdropKeypair and
+      .configuredAirdropLamports == $configuredAirdropLamports and
+      .effectiveAirdropLamports == $effectiveAirdropLamports and
+      .maxProfiles == $maxProfiles and
+      .logPath == $logPath and
+      .snapshotArchiveSha256 == $snapshotArchiveSha256 and
+      .snapshotSha256 == $snapshotSha256 and
+      .processCommandLine == $processCommandLine and
+      .startArguments == $startArguments and
+      (.startedAt | type) == "string" and
+      (.resumedPersistentDatabase | type) == "boolean" and
+      (if .resumedPersistentDatabase then
+         .effectiveAirdropLamports == 0
+       else
+         .effectiveAirdropLamports == .configuredAirdropLamports
+       end)
+    ' "${SURFPOOL_SESSION_FILE}" >/dev/null 2>&1
 }
 
 surfpool_port_is_listening() {
@@ -274,6 +439,7 @@ surfpool_write_runtime_env() {
   {
     printf 'COOKER_NETWORK=surfpool\n'
     printf 'COOKER_REQUIRE_SURFPOOL=true\n'
+    printf 'COOKER_SURFNET_ID=%s\n' "${SURFPOOL_ID}"
     printf 'COOKER_RPC_URL=%s\n' "${SURFPOOL_RPC_URL}"
     printf 'COOKER_WS_URL=%s\n' "${SURFPOOL_WS_URL}"
     printf 'COOKER_SIGNER_PATH=%s\n' "${SURFPOOL_KEYPAIR}"
@@ -284,7 +450,7 @@ surfpool_write_runtime_env() {
 
 surfpool_verify_runtime_env() {
   local key value
-  local found_network=0 found_required=0 found_rpc=0 found_ws=0 found_signer=0
+  local found_network=0 found_required=0 found_surfnet=0 found_rpc=0 found_ws=0 found_signer=0
 
   [[ -r "${SURFPOOL_RUNTIME_ENV}" ]] ||
     surfpool_die "runtime environment is missing: ${SURFPOOL_RUNTIME_ENV}"
@@ -298,6 +464,10 @@ surfpool_verify_runtime_env() {
       COOKER_REQUIRE_SURFPOOL)
         [[ "${value}" == "true" ]] || surfpool_die "COOKER_REQUIRE_SURFPOOL must be true"
         found_required=1
+        ;;
+      COOKER_SURFNET_ID)
+        [[ "${value}" == "${SURFPOOL_ID}" ]] || surfpool_die "application Surfnet ID is not canonical"
+        found_surfnet=1
         ;;
       COOKER_RPC_URL)
         [[ "${value}" == "${SURFPOOL_RPC_URL}" ]] || surfpool_die "application RPC is not canonical"
@@ -316,7 +486,7 @@ surfpool_verify_runtime_env() {
     esac
   done <"${SURFPOOL_RUNTIME_ENV}"
 
-  ((found_network && found_required && found_rpc && found_ws && found_signer)) ||
+  ((found_network && found_required && found_surfnet && found_rpc && found_ws && found_signer)) ||
     surfpool_die "runtime environment is incomplete"
 }
 
@@ -324,28 +494,49 @@ surfpool_write_session() {
   local pid="$1"
   local effective_airdrop_lamports="$2"
   local resumed_persistent_database="$3"
-  local binary_sha256 started_at temp_file
+  local binary_sha256 process_command_line process_start_identity start_arguments
+  local started_at temp_file
 
+  surfpool_process_matches_start_command "${pid}" "${effective_airdrop_lamports}" ||
+    surfpool_die "launched process does not match the configured Surfpool command"
+  process_start_identity="$(surfpool_process_start_identity "${pid}")" ||
+    surfpool_die "failed to identify the launched Surfpool process start"
+  process_command_line="$(surfpool_process_command_line "${pid}")" ||
+    surfpool_die "failed to read the launched Surfpool command"
+  start_arguments="$(surfpool_start_arguments_json "${SURFPOOL_START_COMMAND[@]}")" ||
+    surfpool_die "failed to serialize the launched Surfpool arguments"
   binary_sha256="$(surfpool_file_sha256 "${SURFPOOL_BIN}")"
   started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   temp_file="${SURFPOOL_SESSION_FILE}.tmp.$$"
   jq -n \
+    --argjson sessionSchemaVersion 2 \
     --arg startedAt "${started_at}" \
+    --arg processStartIdentity "${process_start_identity}" \
     --arg binary "${SURFPOOL_BIN}" \
     --arg binarySha256 "${binary_sha256}" \
     --arg surfpoolVersion "${SURFPOOL_EXPECTED_VERSION}" \
     --arg network "${SURFPOOL_NETWORK}" \
+    --arg host "${SURFPOOL_HOST}" \
+    --argjson rpcPort "${SURFPOOL_PORT}" \
+    --argjson websocketPort "${SURFPOOL_WS_PORT}" \
+    --argjson studioPort "${SURFPOOL_STUDIO_PORT}" \
     --arg surfnetId "${SURFPOOL_ID}" \
     --arg rpcUrl "${SURFPOOL_RPC_URL}" \
     --arg wsUrl "${SURFPOOL_WS_URL}" \
     --arg database "${SURFPOOL_DB}" \
+    --arg snapshot "${SURFPOOL_SNAPSHOT_FILE}" \
+    --arg airdropKeypair "${SURFPOOL_KEYPAIR}" \
     --arg snapshotArchiveSha256 "${SURFPOOL_SNAPSHOT_ARCHIVE_SHA256}" \
     --arg snapshotSha256 "${SURFPOOL_SNAPSHOT_SHA256}" \
     --argjson configuredAirdropLamports "${SURFPOOL_AIRDROP_LAMPORTS}" \
     --argjson effectiveAirdropLamports "${effective_airdrop_lamports}" \
+    --argjson maxProfiles "${SURFPOOL_MAX_PROFILES}" \
+    --arg logPath "${SURFPOOL_LOG_DIR}" \
+    --arg processCommandLine "${process_command_line}" \
+    --argjson startArguments "${start_arguments}" \
     --argjson resumedPersistentDatabase "${resumed_persistent_database}" \
     --argjson pid "${pid}" \
-    '{startedAt:$startedAt,pid:$pid,binary:$binary,binarySha256:$binarySha256,surfpoolVersion:$surfpoolVersion,network:$network,surfnetId:$surfnetId,rpcUrl:$rpcUrl,wsUrl:$wsUrl,database:$database,snapshotArchiveSha256:$snapshotArchiveSha256,snapshotSha256:$snapshotSha256,configuredAirdropLamports:$configuredAirdropLamports,effectiveAirdropLamports:$effectiveAirdropLamports,resumedPersistentDatabase:$resumedPersistentDatabase}' \
+    '{sessionSchemaVersion:$sessionSchemaVersion,startedAt:$startedAt,pid:$pid,processStartIdentity:$processStartIdentity,binary:$binary,binarySha256:$binarySha256,surfpoolVersion:$surfpoolVersion,network:$network,host:$host,rpcPort:$rpcPort,websocketPort:$websocketPort,studioPort:$studioPort,surfnetId:$surfnetId,rpcUrl:$rpcUrl,wsUrl:$wsUrl,database:$database,snapshot:$snapshot,airdropKeypair:$airdropKeypair,snapshotArchiveSha256:$snapshotArchiveSha256,snapshotSha256:$snapshotSha256,configuredAirdropLamports:$configuredAirdropLamports,effectiveAirdropLamports:$effectiveAirdropLamports,maxProfiles:$maxProfiles,logPath:$logPath,processCommandLine:$processCommandLine,startArguments:$startArguments,resumedPersistentDatabase:$resumedPersistentDatabase}' \
     >"${temp_file}"
   chmod 600 "${temp_file}"
   mv "${temp_file}" "${SURFPOOL_SESSION_FILE}"

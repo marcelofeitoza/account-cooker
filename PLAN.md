@@ -1,11 +1,12 @@
 # Account Cooker Master Plan
 
-Status: implementation complete; canonical evidence and clean-clone release verification
-remain before the draft is ready for Marcelo's review.
+Status: source implementation and Block E records complete; canonical evidence, two
+clean-clone release verifications, sponsor AI-assistance eligibility, and Marcelo's
+approval remain before the draft can leave draft state.
 
 This document is the public implementation and release contract for the bounty build. It
-defines what will be built, what evidence is required, which claims are permitted,
-and which features are cut before correctness, Surfpool verification, or safety.
+defines what is implemented, what evidence is still required, which claims are permitted,
+and which features remain outside the completion boundary.
 
 ## Completion State
 
@@ -15,12 +16,13 @@ and which features are cut before correctness, Surfpool verification, or safety.
 | B | personas, scheduler, SQLite durability, policy, concurrency, properties | complete |
 | C | native SOL, SPL, Jupiter, and native stake through Surfpool | complete |
 | D | crash, unknown outcome, restart, rollback audit, budget, kill switch | complete |
-| E | evaluator, security/provenance, public docs, Obsidian record | in progress |
-| F | canonical soaks, sanitized evidence, two clean-clone proofs, draft PR handoff | pending |
+| E | evaluator, security/provenance, public docs, Obsidian record | complete |
+| F | canonical soaks, sanitized evidence, two clean-clone proofs, draft PR handoff | in progress |
 
-"Complete" here means implemented and exercised by the reduced full-demo rehearsal. Block
-F is deliberately separate: only its clean-tree canonical artifacts may support the final
-reported scale and transaction counts.
+"Complete" in this table describes implemented source and focused/reduced verification,
+not canonical results. Block F is deliberately separate: only its clean-tree canonical
+artifacts may support the final reported scale and transaction counts. There is currently
+no `evidence/final` pack.
 
 ## 1. Objective
 
@@ -44,7 +46,8 @@ The following decisions are fixed for the complete deliverable:
 - Identity: independent personal contribution.
 - Development chain: Surfpool only.
 - Upstream writes: development never submits to devnet or mainnet.
-- Source: clean-room implementation from the bounty specification and public APIs.
+- Source: standalone clean-room implementation from the bounty specification and public
+  APIs, with no code, fixture, service, key, data, or runtime dependency on Cloak.
 - Runtime default: dry-run, followed by an explicit Surfpool execution mode.
 - Claim policy: no anonymity or indistinguishability claim without evaluator evidence.
 - Safety policy: no wash trading, self-trading, governance voting, referral farming,
@@ -64,9 +67,14 @@ The bounty build is complete only when every mandatory gate is green:
   stop, restart, reconcile, and continue without double execution.
 - Native transfer, SPL transfer, and Jupiter swap complete on Surfpool.
 - A native stake create/delegate/deactivate/withdraw lifecycle completes on Surfpool.
-- A 1,000-agent, 30-virtual-day simulation produces a deterministic trace.
-- A compressed wall-clock Surfpool soak executes a bounded subset of that trace.
-- The evaluator compares naive and modeled behavior over at least five seeds.
+- Six real child processes are stopped with `SIGKILL` at distinct durable lifecycle
+  checkpoints and recover against the same SQLite database and Surfpool without a
+  duplicate submit, signature, logical action, or event trace.
+- A 1,000-agent, 30-virtual-day simulation produces deterministic traces for the five
+  canonical seeds.
+- A compressed wall-clock Surfpool soak executes at least 1,000 bounded native transfers
+  with injected response loss and restart recovery.
+- The evaluator compares naive and modeled behavior over the five canonical seeds.
 - An evidence manifest records commands, versions, seeds, Surfpool configuration,
   transaction signatures, test results, metrics, and known limitations.
 - The README states only claims supported by the committed evidence.
@@ -154,12 +162,13 @@ The workspace has six crates:
    - Seed aggregation, confidence intervals, ablations, and report generation.
 
 6. **cooker-cli**
-   - Commands: init, plan, run, status, recover, evaluate, doctor.
+   - Commands: keygen, fleet-init, fund, init, validate, plan, simulate, evaluate, soak,
+     doctor, run, status, and recover.
    - TOML configuration with environment overrides for non-secret values.
    - JSON output for automation and concise human output for operators.
 
-Crates may be collapsed if compile boundaries slow delivery without clarifying ownership.
-The domain, store, chain, runtime, evaluation, and CLI ownership boundaries remain.
+These domain, store, chain, runtime, evaluation, and CLI ownership boundaries are the
+implemented workspace graph.
 
 ## 7. Core Interfaces
 
@@ -278,7 +287,7 @@ are sampled separately from transitions so the engine does not become a memoryle
 - Hold time and consolidation are first-class actions because longitudinal linkage is
   more important than a single transaction's appearance.
 
-## 10. Adapter Order
+## 10. Implemented Adapter Boundaries
 
 1. **Native transfer**
    - Establish transaction, confirmation, receipt, and recovery plumbing.
@@ -289,10 +298,14 @@ are sampled separately from transitions so the engine does not become a memoryle
    - Assert mint, owner, ATA, decimals, and token balance changes.
 
 3. **Jupiter swap**
-   - Use the public quote/instruction interface.
-   - Rebuild with a Surfpool blockhash and local signer.
+   - Use a reviewed quote/instruction fixture and a hash-pinned 21-account Surfpool
+     snapshot for deterministic canonical acceptance.
+   - Rebind only the fixture signer and its WSOL/USDC ATAs, then rebuild with a current
+     Surfpool blockhash and fresh local signer.
    - Simulate before submit.
    - Assert input/output balance ranges, route program allowlist, and slippage.
+   - Retain live public quote/instruction retrieval only as an explicitly selected
+     planning mode, not as canonical evidence.
 
 4. **Native stake lifecycle**
    - Create and initialize a stake account, delegate it to a local vote account, advance
@@ -374,20 +387,20 @@ full-demo runs default to port 18899. Code rejects non-loopback Solana RPC URLs 
 requires the exact pinned Surfpool identity. The workflow is documented in
 docs/SURFPOOL.md.
 
-Required scenarios:
+The chain-acceptance script executes six ordered groups on fresh isolated state:
 
-- fresh fleet bootstrap and funding;
-- native and SPL success;
-- Jupiter success and rejected slippage;
-- stateful lifecycle success;
-- insufficient balance;
-- expired or stale blockhash;
-- transient RPC failure before submit;
-- unknown response after submit;
-- process crash after submit and before confirmation persistence;
-- restart and reconciliation;
-- policy rejection;
-- accelerated multi-agent soak.
+1. native SOL with exact principal and fee attribution;
+2. reviewed-state Jupiter exact-input with signer/ATA rebinding and bounded deltas;
+3. classic SPL with ATA creation, exact token/native deltas, and historical re-audit;
+4. insufficient-funds rejection, simulation failure, stale-blockhash expiry, and
+   same-signature unknown-outcome reconciliation;
+5. real-process crash/restart recovery at six persistence/side-effect checkpoints;
+6. native stake create/delegate/deactivate/epoch-advance/withdraw with exact phase deltas
+   and confirmation re-audits.
+
+Stake is deliberately last because its epoch travel is irreversible inside that Surfpool
+process. The separate compressed soak proves bounded concurrent execution, one lost send
+response, runtime reconstruction, persistent Surfpool restart, and reconciliation.
 
 Every integration test starts or targets a named, isolated Surfnet and records:
 
@@ -434,121 +447,74 @@ Every integration test starts or targets a named, isolated Surfnet and records:
 
 The complete evidence requirements are in docs/VALIDATION.md.
 
-## 16. One-Session Execution Graph
+## 16. Completion Blocks
 
-This is a dependency graph, not a promise to wait for clock boundaries. Independent work
-streams run in parallel after the domain contract is fixed.
+### Blocks A-D: implemented
 
-### Block A: foundation, 0:00 to 1:30
+- The pinned workspace, six-crate ownership boundaries, configuration, CI, and fail-closed
+  Surfpool harness are present.
+- Deterministic personas, the bounded scheduler, policy engine, SQLite WAL lifecycle,
+  leases, journals, audits, properties, and concurrency controls are present.
+- Native SOL, classic SPL, reviewed-state Jupiter, and native stake adapters execute
+  through the common Surfpool gateway with protocol-specific postconditions.
+- Recovery covers stale blockhash, simulation failure, insufficient funds, unknown send
+  response, historical re-audit, persistent Surfpool restart, and six real `SIGKILL`
+  subprocess checkpoints.
 
-- Create Rust workspace, toolchain, lint configuration, and CI.
-- Define domain types, errors, config, trace schema, and adapter/store contracts.
-- Add deterministic clock and RNG test harness.
-- Start the canonical Surfpool network and doctor check.
+### Block E: implementation hardening and records complete
 
-Gate A: workspace is green and Surfpool health check passes.
+- The evaluator, five-seed experiment, supply-chain gates, secret scans, evidence builder,
+  and public documentation are present.
+- The separately indexed Obsidian project and session records are current. They remain
+  operator memory only and are not a source or runtime dependency of this repository.
+- The expanded reduced full demo, six process-crash cases, and persistent Surfpool restart
+  pass; only canonical-scale Block F artifacts may support final scale claims.
 
-### Block B: state and scheduling, 1:30 to 3:30
+### Block F: canonical release proof in progress
 
-- Implement SQLite migrations and Store.
-- Implement priority scheduler, persona states, policy skeleton, and deterministic planner.
-- Add 1,000-agent virtual simulation and state-machine properties.
-
-Gate B: same seed produces byte-identical trace; store restart preserves next actions.
-
-### Block C: chain execution, 3:30 to 6:30
-
-- Implement Surfpool RPC guard, signer, blockhash, simulate, submit, confirm, observe.
-- Complete native and SPL adapters.
-- Add unknown-outcome reconciliation and crash injection.
-- Complete Jupiter adapter.
-
-Gate C: all three action types pass from a clean Surfnet with state assertions.
-
-### Block D: stateful adapter and evaluator, 6:30 to 9:30
-
-- Implement the native stake create/delegate/deactivate/withdraw lifecycle.
-- Implement feature extraction, baselines, metrics, seed aggregation, and ablations.
-- Connect chain receipts to stable trace rows.
-
-Gate D: one stateful lifecycle and evaluator known-ground-truth tests pass.
-
-### Block E: hardening and proof, 9:30 to 12:00
-
-- Run restart, fault, virtual-scale, and compressed Surfpool soak scenarios.
-- Run fmt, Clippy, full tests, optional deny/bench.
-- Generate evidence pack and full-demo output.
-- Update implementation status, limitations, architecture, and draft PR.
-
-Gate E: no mandatory failure, no unsupported claim, no secret in Git, clean worktree.
-
-### Block F: canonical release proof and handoff
-
-- Run the five-seed, 1,000-agent by 30-day virtual soak from a clean commit.
-- Run 1,000 locally signed Surfpool transactions with response-loss, runtime-restart, and
-  persistent Surfpool-restart reconciliation.
-- Generate and review the sanitized checksum-bearing evidence pack.
+- Run exactly five seeds over 1,000 agents for 30 virtual days from a clean commit.
+- Run at least 1,000 locally signed Surfpool soak transactions with response loss, runtime
+  reconstruction, persistent Surfpool restart, and reconciliation without resend.
+- Generate and review the sanitized checksum-bearing `evidence/final` pack.
 - Reproduce the complete canonical command twice from fresh clones and fresh Surfpool
-  state without touching a public network.
-- Push ordered commits and update the draft PR with implemented behavior and measured
-  limitations.
+  state without a public-network write.
+- Push the implementation and evidence commits and update the draft PR with measured
+  results and limitations.
 - Resolve human-only/AI-assistance eligibility and obtain Marcelo's approval before any
   submission or transition out of draft.
 
-Gate F: committed canonical evidence matches its source commit, both clean-clone runs pass,
-the PR remains draft, and no external approval is assumed.
+Gate F passes only when committed canonical evidence matches its source commit, both
+clean-clone runs pass, and no external approval is assumed.
 
-## 17. Scope-Cut Rules
+## 17. Fixed Scope Boundary
 
-Cuts happen in this order:
+The complete bounty deliverable retains Surfpool execution, deterministic testing,
+state recovery and idempotency, endpoint and budget guardrails, evaluator correctness,
+sanitized evidence, and honest limitations. None can be removed to make a failing
+canonical run appear successful.
 
-1. Orca stretch adapter.
-2. Prometheus UI and benchmarks.
-3. Historical observed-traffic calibration.
-4. Marinade, replaced by tested native stake lifecycle.
-5. Advanced learned classifier, retaining transparent heuristic metrics.
+Orca LP, Prometheus/UI work, benchmarks, historical observed-traffic calibration,
+advanced learned classifiers, and Marinade remain unimplemented extensions. Native Solana
+stake is the tested stateful fallback and is not represented as Marinade. A reviewed
+instruction fixture is accepted only with a successful Surfpool simulation, confirmation,
+and state transition.
 
-Never cut:
+## 18. Draft PR And Evidence State
 
-- Surfpool execution;
-- deterministic tests;
-- state recovery and idempotency;
-- endpoint and budget guardrails;
-- evaluator known-ground-truth correctness;
-- evidence manifest;
-- honest limitation documentation;
-- format and Clippy gates.
-
-No blocked adapter is represented as working. A golden instruction fixture is not a
-substitute for a successful Surfpool state transition.
-
-## 18. Commit And PR Sequence
-
-The draft PR remains reviewable through small, ordered commits:
-
-1. docs: define measured account-cooker implementation plan
-2. chore: scaffold Rust workspace and quality gates
-3. feat: add deterministic personas and fleet scheduler
-4. feat: add durable action state and restart recovery
-5. feat: add Surfpool runtime and transfer adapters
-6. feat: add Jupiter and stateful protocol lifecycles
-7. feat: add adversarial evaluator and comparative reports
-8. test: add Surfpool recovery and scale evidence
-9. docs: publish reproducible demo and supported claims
-
-The PR stays draft until every mandatory gate passes. Earlier planning-only commits must
-not be interpreted as evidence; only the implementation commits and checksum-bearing
-canonical pack support the final claims.
+The PR remains draft until every mandatory gate passes. Planning-only commits are not
+evidence. Implementation commits establish reviewable source; only a checksum-bearing
+canonical pack tied to its exact clean commit can support final scale, transaction, or
+metric claims.
 
 ## 19. Sponsor Clarifications
 
 The listing currently reports `agentAccess: HUMAN_ONLY`. That blocks agent-API submission,
 but it does not itself answer whether a human may submit AI-assisted implementation. The
-following questions do not block the safe local build, but they do block final submission:
+first question blocks final submission; the remaining questions affect positioning but do
+not relax any local safety or evidence gate:
 
 - Does HUMAN_ONLY govern only the submitting profile, or AI-assisted implementation too?
 - Must the PR be merged, or only publicly reviewable, before the deadline?
-- Is Surfpool proof sufficient, or is a public devnet/mainnet transaction expected?
 - What exact attacker and metric should satisfy statistically indistinguishable?
 - Are unsafe examples such as governance voting and artificial protocol activity optional?
 - Does Rust end to end allow shell runbooks and generated JSON evidence?

@@ -85,6 +85,7 @@ COOKER_SOAK_CONCURRENCY="${concurrency}" \
 COOKER_SOAK_RESTART_SURFPOOL=1 \
 COOKER_SOAK_DATABASE="${output_dir}/cooker.sqlite" \
 COOKER_SOAK_EVIDENCE="${output_dir}/soak.json" \
+COOKER_SURFNET_ID="${COOKER_SURFNET_ID}" \
 COOKER_RPC_URL="${COOKER_RPC_URL}" \
 COOKER_SIGNER_PATH="${COOKER_SIGNER_PATH}" \
   cargo test --locked -p cooker-solana --test surfpool_soak \
