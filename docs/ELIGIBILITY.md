@@ -35,13 +35,14 @@ this contribution.
 
 Neither the listing nor the platform terms state that a human entrant may not use AI tools.
 `HUMAN_ONLY` is the platform's submission-identity control; it is not published as an
-authorship or tool-use prohibition. This contribution is reviewed and submitted by Marcelo
-through his human profile, and the draft PR explicitly discloses that development was
-AI-assisted under his direction.
+authorship or tool-use prohibition. This contribution will be reviewed and, if approved,
+submitted by Marcelo through his human profile. The draft PR explicitly discloses that
+development was AI-assisted under his direction.
 
 On the published rules, disclosed AI-assisted implementation is compatible with a human
-submission. A later listing change or direct sponsor instruction would supersede this dated
-audit and must be reviewed before submission.
+submission. This is an inference from the published rules, not a direct sponsor assurance.
+A later listing change or direct sponsor instruction would supersede this dated audit and
+must be reviewed before submission.
 
 ## Rust Interpretation
 
