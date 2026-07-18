@@ -6,6 +6,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 run_token="$(date -u '+%Y%m%dT%H%M%SZ')-$$"
 run_started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 original_arguments=("$@")
+original_argument_count=$#
 mode=canonical
 output_dir=''
 evidence_dir=''
@@ -443,7 +444,10 @@ jq -e --arg surfnet_id "${SURFPOOL_ID}" --arg database "${SURFPOOL_DB}" '
 ' "${output_dir}/chain-surfpool-session.json" >/dev/null ||
   die "chain acceptance session did not prove fresh independent state"
 
-original_arguments_json="$(jq -cn --args '$ARGS.positional' -- "${original_arguments[@]}")"
+original_arguments_json='[]'
+if ((original_argument_count > 0)); then
+  original_arguments_json="$(jq -cn --args '$ARGS.positional' -- "${original_arguments[@]}")"
+fi
 jq -n \
   --arg run_id "${run_token}" \
   --arg mode "${mode}" \
