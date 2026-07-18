@@ -1,7 +1,7 @@
 # Validation And Evidence Plan
 
-Status: executable acceptance contract implemented; the canonical clean-tree run, two
-fresh-clone repetitions, and committed `evidence/final` pack are pending. Reduced or
+Status: executable acceptance contract implemented and complete. The canonical clean-tree
+run, two fresh-clone repetitions, and committed `evidence/final` pack passed. Reduced or
 focused runs cannot be cited as canonical results.
 
 ## 1. Quality Gates

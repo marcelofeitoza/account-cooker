@@ -1,6 +1,8 @@
 # Architecture
 
-Status: implemented architecture; canonical release evidence is pending.
+Status: implemented architecture; canonical release evidence and two independent
+clean-clone verifications are complete. The pull request remains draft for Marcelo's
+human review and submission decision.
 
 This repository is a standalone clean-room implementation. It has no source, fixture,
 service, key, data, or runtime dependency on Cloak; anything conceptually similar was

@@ -1,7 +1,7 @@
 # Threat Model And Claim Policy
 
-Status: implemented claim contract. No anonymity, unlinkability, or human-indistinguishability
-result is claimed; canonical comparative evidence is pending.
+Status: implemented claim contract with committed canonical comparative evidence. No
+anonymity, unlinkability, or human-indistinguishability result is claimed.
 
 ## 1. Purpose
 
