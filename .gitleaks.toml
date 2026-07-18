@@ -1,0 +1,36 @@
+title = "Account Cooker secret scanning policy"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated Rust artifacts are not source inputs"
+paths = ['''(^|/)target/''']
+
+[[rules]]
+id = "generic-api-key"
+
+    [[rules.allowlists]]
+    description = "Exact public AMM addresses captured in sanitized Jupiter fixtures"
+    condition = "AND"
+    regexTarget = "secret"
+    regexes = [
+      '''5BKxfWMbmYBAEWvyPZS9esPducUba9GqyMjtLCfbaqyF''',
+      '''CYbD9RaToYMtWKA7QZyoLahnHdWq553Vm62Lh6qWtuxq''',
+    ]
+    paths = [
+      '''^fixtures/jupiter/quote-orca-direct\.json$''',
+      '''^fixtures/surfpool/jupiter/raydium-clmm-sol-usdc\.quote\.json$''',
+      '''^fixtures/surfpool/jupiter/raydium-clmm-sol-usdc-cyb-433411234\.quote\.json$''',
+    ]
+
+    [[rules.allowlists]]
+    description = "Exact public Agave keygen binary checksum pinned in CI"
+    condition = "AND"
+    regexTarget = "secret"
+    regexes = [
+      '''f6bd08efb500f264ae03df2372577e854f06e98dee6263a54533212995734aad''',
+    ]
+    paths = [
+      '''^\.github/workflows/ci\.yml$''',
+    ]

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-07-18T00:00:00Z",
+  "surfpool_version": "1.4.0",
+  "source_network": "mainnet",
+  "source_slot": 433717382,
+  "export_scope": "preTransaction",
+  "account_count": 21,
+  "contains_private_material": false,
+  "reviewed_fixture_signer_removed": true,
+  "archive": "raydium-clmm-sol-usdc-433717382.snapshot.json.gz",
+  "archive_sha256": "f1efd977ec801baec8856e594d215965414440a8a0158b7fcc607b1bb196f2b1",
+  "decompressed_sha256": "b2c428d69c90388c3dcdfa91f1789c82a6584544885eb6272b55cbb7094aeaab",
+  "quote_fixture": "raydium-clmm-sol-usdc-cyb-433411234.quote.json",
+  "instructions_fixture": "raydium-clmm-sol-usdc-cyb-433411234.instructions.json",
+  "jupiter_program": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  "route_program": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",
+  "lookup_table": "BDqppwFYeMpUicN9xbfoM7FgRnHVW1uTUtrGA7uG2vQg"
+}

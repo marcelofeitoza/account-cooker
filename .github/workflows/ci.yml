@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  rust:
+    name: Rust and deterministic soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install exact Rust toolchain
+        run: |
+          rustup toolchain install 1.92.0 --profile minimal --component clippy,rustfmt
+          rustup override set 1.92.0
+      - name: Verify locked dependency graph
+        run: cargo metadata --locked --format-version 1 --no-deps >/dev/null
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run strict Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Run workspace tests
+        run: cargo test --locked --workspace --all-features
+      - name: Run documentation tests
+        run: cargo test --locked --workspace --doc
+      - name: Check shell scripts
+        run: shellcheck -x -P SCRIPTDIR scripts/*.sh scripts/lib/*.sh
+      - name: Run replay-verified quick soak
+        run: >-
+          bash scripts/virtual-soak.sh
+          --quick
+          --seeds 11,23,37,51,71
+          --agents 32
+          --days 3
+          --output "$RUNNER_TEMP/virtual-soak"
+
+  security:
+    name: Dependency and secret policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install exact Rust toolchain
+        run: |
+          rustup toolchain install 1.92.0 --profile minimal
+          rustup override set 1.92.0
+      - name: Install pinned Rust security tools
+        run: |
+          cargo install cargo-audit --version 0.22.1 --locked
+          cargo install cargo-deny --version 0.20.2 --locked
+      - name: Install checksum-verified Gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_ARCHIVE_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          bindir="$RUNNER_TEMP/gitleaks-bin"
+          curl --fail --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$GITLEAKS_ARCHIVE_SHA256" "$archive" | sha256sum --check --strict
+          mkdir -p "$bindir"
+          tar --extract --gzip --file "$archive" --directory "$bindir" gitleaks
+          printf '%s\n' "$bindir" >>"$GITHUB_PATH"
+      - name: Audit RustSec advisories
+        run: cargo audit
+      - name: Enforce dependency policy
+        run: cargo deny check --hide-inclusion-graph
+      - name: Scan repository and history for secrets
+        run: |
+          gitleaks dir --redact --no-banner --verbose .
+          gitleaks git --redact --no-banner --verbose .
+
+  surfpool:
+    name: Real Surfpool chain acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install exact Rust toolchain
+        run: |
+          rustup toolchain install 1.92.0 --profile minimal --component clippy,rustfmt
+          rustup override set 1.92.0
+      - name: Install harness prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes jq lsof
+      - name: Install checksum-verified Surfpool and Agave tools
+        env:
+          SURFPOOL_VERSION: 1.4.0
+          SURFPOOL_ARCHIVE_SHA256: b65e3e18da8e97a0558e04693d76a12aa31111c7d74958da7cee0fd2eeb4cae8
+          SURFPOOL_BINARY_SHA256: 49907282c15e0d9a523c796fc150f3d784e53a68273e998916ee07cac24b59f0
+          AGAVE_VERSION: 3.1.8
+          AGAVE_ARCHIVE_SHA256: e951bb8127c57460bc3ebca1671952e9b164e249d713fcebe2c125f70b8791e8
+          SOLANA_BINARY_SHA256: 477f35cbc9ecd050e21cfbfe34e856ca0665896f9c2cec7354cc6eec501b06a1
+          SOLANA_KEYGEN_BINARY_SHA256: f6bd08efb500f264ae03df2372577e854f06e98dee6263a54533212995734aad
+        run: |
+          bindir="$RUNNER_TEMP/chain-tools"
+          surfpool_archive="$RUNNER_TEMP/surfpool.tar.gz"
+          agave_archive="$RUNNER_TEMP/agave.tar.bz2"
+          mkdir -p "$bindir"
+          curl --fail --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/solana-foundation/surfpool/releases/download/v${SURFPOOL_VERSION}/surfpool-linux-x64.tar.gz" \
+            --output "$surfpool_archive"
+          printf '%s  %s\n' "$SURFPOOL_ARCHIVE_SHA256" "$surfpool_archive" | sha256sum --check --strict
+          tar --extract --gzip --file "$surfpool_archive" --directory "$bindir" surfpool
+          printf '%s  %s\n' "$SURFPOOL_BINARY_SHA256" "$bindir/surfpool" | sha256sum --check --strict
+          curl --fail --show-error --location --proto '=https' --tlsv1.2 \
+            "https://github.com/anza-xyz/agave/releases/download/v${AGAVE_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2" \
+            --output "$agave_archive"
+          printf '%s  %s\n' "$AGAVE_ARCHIVE_SHA256" "$agave_archive" | sha256sum --check --strict
+          tar --extract --bzip2 --file "$agave_archive" --directory "$bindir" \
+            --strip-components=2 solana-release/bin/solana solana-release/bin/solana-keygen
+          printf '%s  %s\n' "$SOLANA_BINARY_SHA256" "$bindir/solana" | sha256sum --check --strict
+          printf '%s  %s\n' "$SOLANA_KEYGEN_BINARY_SHA256" "$bindir/solana-keygen" | sha256sum --check --strict
+          printf '%s\n' "$bindir" >>"$GITHUB_PATH"
+      - name: Record exact chain tool versions
+        run: |
+          surfpool --version
+          solana --version
+          solana-keygen --version
+      - name: Run full local-chain acceptance
+        run: bash scripts/surfpool-chain-acceptance.sh

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "name": "classic-spl-transfer-with-destination-ata-creation",
+  "runtime": {
+    "kind": "surfpool",
+    "version": "1.4.0",
+    "rpc": "http://127.0.0.1:8899"
+  },
+  "programs": {
+    "token": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "associated_token": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+    "system": "11111111111111111111111111111111"
+  },
+  "mint": {
+    "decimals": 6,
+    "minted_raw": 5000000
+  },
+  "transfer": {
+    "amount_raw": 1234567,
+    "destination_ata_must_be_absent_before": true,
+    "destination_ata_rent": "query_exactly_from_surfpool"
+  },
+  "acceptance": {
+    "require_simulation": true,
+    "require_confirmed_metadata": true,
+    "require_exact_token_deltas": true,
+    "require_exact_fee_and_rent_overhead": true,
+    "allow_mocked_success": false,
+    "allow_public_network_write": false
+  }
+}

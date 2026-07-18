@@ -1,0 +1,106 @@
+{
+  "tokenLedgerInstruction": null,
+  "computeBudgetInstructions": [
+    {
+      "programId": "ComputeBudget111111111111111111111111111111",
+      "accounts": [],
+      "data": "AsBcFQA="
+    }
+  ],
+  "setupInstructions": [
+    {
+      "programId": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "accounts": [
+        { "pubkey": "5nNamRwUKNUCK272DkjaMWtghCBLwFSaGiLU5oCdwYJr", "isSigner": true, "isWritable": true },
+        { "pubkey": "HrAfP8hA5yrNxk1Zs58GdrTnSkt289vD5BwXSq7C8ACL", "isSigner": false, "isWritable": true },
+        { "pubkey": "5nNamRwUKNUCK272DkjaMWtghCBLwFSaGiLU5oCdwYJr", "isSigner": false, "isWritable": false },
+        { "pubkey": "So11111111111111111111111111111111111111112", "isSigner": false, "isWritable": false },
+        { "pubkey": "11111111111111111111111111111111", "isSigner": false, "isWritable": false },
+        { "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "isSigner": false, "isWritable": false }
+      ],
+      "data": "AQ=="
+    },
+    {
+      "programId": "11111111111111111111111111111111",
+      "accounts": [
+        { "pubkey": "5nNamRwUKNUCK272DkjaMWtghCBLwFSaGiLU5oCdwYJr", "isSigner": true, "isWritable": true },
+        { "pubkey": "HrAfP8hA5yrNxk1Zs58GdrTnSkt289vD5BwXSq7C8ACL", "isSigner": false, "isWritable": true }
+      ],
+      "data": "AgAAAADh9QUAAAAA"
+    },
+    {
+      "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "accounts": [
+        { "pubkey": "HrAfP8hA5yrNxk1Zs58GdrTnSkt289vD5BwXSq7C8ACL", "isSigner": false, "isWritable": true }
+      ],
+      "data": "EQ=="
+    },
+    {
+      "programId": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "accounts": [
+        { "pubkey": "5nNamRwUKNUCK272DkjaMWtghCBLwFSaGiLU5oCdwYJr", "isSigner": true, "isWritable": true },
+        { "pubkey": "4zX55QTMEev29LZEC3eqjindcRtAuP8a1jBMmLCRmqye", "isSigner": false, "isWritable": true },
+        { "pubkey": "5nNamRwUKNUCK272DkjaMWtghCBLwFSaGiLU5oCdwYJr", "isSigner": false, "isWritable": false },
+        { "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "isSigner": false, "isWritable": false },
+        { "pubkey": "11111111111111111111111111111111", "isSigner": false, "isWritable": false },
+        { "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "isSigner": false, "isWritable": false }
+      ],
+      "data": "AQ=="
+    }
+  ],
+  "swapInstruction": {
+    "programId": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+    "accounts": [
+      { "pubkey": "5nNamRwUKNUCK272DkjaMWtghCBLwFSaGiLU5oCdwYJr", "isSigner": true, "isWritable": false },
+      { "pubkey": "HrAfP8hA5yrNxk1Zs58GdrTnSkt289vD5BwXSq7C8ACL", "isSigner": false, "isWritable": true },
+      { "pubkey": "4zX55QTMEev29LZEC3eqjindcRtAuP8a1jBMmLCRmqye", "isSigner": false, "isWritable": true },
+      { "pubkey": "So11111111111111111111111111111111111111112", "isSigner": false, "isWritable": false },
+      { "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "isSigner": false, "isWritable": false },
+      { "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "isSigner": false, "isWritable": false },
+      { "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "isSigner": false, "isWritable": false },
+      { "pubkey": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", "isSigner": false, "isWritable": false },
+      { "pubkey": "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf", "isSigner": false, "isWritable": false },
+      { "pubkey": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", "isSigner": false, "isWritable": false },
+      { "pubkey": "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", "isSigner": false, "isWritable": false },
+      { "pubkey": "5nNamRwUKNUCK272DkjaMWtghCBLwFSaGiLU5oCdwYJr", "isSigner": false, "isWritable": false },
+      { "pubkey": "EdPxg8QaeFSrTYqdWJn6Kezwy9McWncTYueD9eMGCuzR", "isSigner": false, "isWritable": false },
+      { "pubkey": "CYbD9RaToYMtWKA7QZyoLahnHdWq553Vm62Lh6qWtuxq", "isSigner": false, "isWritable": true },
+      { "pubkey": "HrAfP8hA5yrNxk1Zs58GdrTnSkt289vD5BwXSq7C8ACL", "isSigner": false, "isWritable": true },
+      { "pubkey": "4zX55QTMEev29LZEC3eqjindcRtAuP8a1jBMmLCRmqye", "isSigner": false, "isWritable": true },
+      { "pubkey": "GviiXg2Xc1xCpyNY36r7h1EAy7uvse5UMkiiyHjRDU6Z", "isSigner": false, "isWritable": true },
+      { "pubkey": "3bWPj5eepJm8CxUzk5MMFMN2CFJkntxKvbmy4zwwtpJd", "isSigner": false, "isWritable": true },
+      { "pubkey": "AA5RaVvyGyZgtmAsJJHT5ZVBxVPtAXuYaMwfgeFJW4Mk", "isSigner": false, "isWritable": true },
+      { "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "isSigner": false, "isWritable": false },
+      { "pubkey": "E3HmgD8ru5YZacD7vzrJ9M327dMUrBVpUqCLu9Muw3Er", "isSigner": false, "isWritable": true },
+      { "pubkey": "72jQFwjd14BEhyDfdQsH7D2hS5dN1H6bzsikjkyHyx2D", "isSigner": false, "isWritable": true },
+      { "pubkey": "7k1RJiuyfb3XGq7JzeyYRH6d98gmzqQvmNWyffzk24mF", "isSigner": false, "isWritable": true },
+      { "pubkey": "DN8zwL3mdUndZ1AQG1DkswkDSrCfgmcCNuCSwkv4r93z", "isSigner": false, "isWritable": true },
+      { "pubkey": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", "isSigner": false, "isWritable": false }
+    ],
+    "data": "u2T6zDHErxQA4fUFAAAAAB+tcgAAAAAAMgAAAAAAAQAAABoQJwAB"
+  },
+  "cleanupInstruction": {
+    "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "accounts": [
+      { "pubkey": "HrAfP8hA5yrNxk1Zs58GdrTnSkt289vD5BwXSq7C8ACL", "isSigner": false, "isWritable": true },
+      { "pubkey": "5nNamRwUKNUCK272DkjaMWtghCBLwFSaGiLU5oCdwYJr", "isSigner": false, "isWritable": true },
+      { "pubkey": "5nNamRwUKNUCK272DkjaMWtghCBLwFSaGiLU5oCdwYJr", "isSigner": true, "isWritable": false }
+    ],
+    "data": "CQ=="
+  },
+  "otherInstructions": [],
+  "addressLookupTableAddresses": [
+    "BDqppwFYeMpUicN9xbfoM7FgRnHVW1uTUtrGA7uG2vQg"
+  ],
+  "prioritizationFeeLamports": 0,
+  "computeUnitLimit": 1400000,
+  "prioritizationType": {
+    "computeBudget": { "microLamports": 0, "estimatedMicroLamports": null }
+  },
+  "simulationSlot": null,
+  "dynamicSlippageReport": null,
+  "simulationError": null,
+  "addressesByLookupTableAddress": null,
+  "timeTaken": 0.000093012,
+  "createAtaTimeTaken": 0.000075837
+}

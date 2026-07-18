@@ -1,0 +1,29 @@
+{
+  "inputMint": "So11111111111111111111111111111111111111112",
+  "inAmount": "100000000",
+  "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "outAmount": "16198753",
+  "otherAmountThreshold": "16117760",
+  "swapMode": "ExactIn",
+  "slippageBps": 50,
+  "priceImpactPct": "0.0001",
+  "routePlan": [
+    {
+      "swapInfo": {
+        "ammKey": "5BKxfWMbmYBAEWvyPZS9esPducUba9GqyMjtLCfbaqyF",
+        "label": "Orca Whirlpool",
+        "inputMint": "So11111111111111111111111111111111111111112",
+        "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "inAmount": "100000000",
+        "outAmount": "16198753",
+        "feeAmount": "0",
+        "feeMint": "So11111111111111111111111111111111111111112"
+      },
+      "percent": 100
+    }
+  ],
+  "platformFee": null,
+  "contextSlot": 299283763,
+  "timeTaken": 0.015257836,
+  "mostReliableAmmsQuoteReport": null
+}

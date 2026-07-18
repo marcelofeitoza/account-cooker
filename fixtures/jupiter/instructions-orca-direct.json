@@ -1,0 +1,19 @@
+{
+  "tokenLedgerInstruction": null,
+  "computeBudgetInstructions": [],
+  "setupInstructions": [],
+  "swapInstruction": {
+    "programId": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+    "accounts": [
+      {
+        "pubkey": "BQ72nSv9f3PRyRKCBnHLVrerrv37CYTHm5h3s9VSGQDV",
+        "isSigner": false,
+        "isWritable": true
+      }
+    ],
+    "data": "AQID"
+  },
+  "cleanupInstruction": null,
+  "otherInstructions": [],
+  "addressLookupTableAddresses": []
+}

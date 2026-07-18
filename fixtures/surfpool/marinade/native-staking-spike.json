@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-07-17",
+  "environment": {
+    "kind": "surfpool",
+    "version": "1.4.0",
+    "network": "mainnet_lazy_fork",
+    "rpc": "loopback_only"
+  },
+  "account_probe": {
+    "proxy_program": {
+      "address": "mnspJQyF1KdDEs5c6YJPocYdY1esBgVQFufM2dY9oDk",
+      "exists": true,
+      "executable": true,
+      "owner": "BPFLoaderUpgradeab1e11111111111111111111111"
+    },
+    "staker_root": {
+      "address": "4TNsDg9aHCyDt5axK8aDuhgrengnDBGzyHHzKGnTiGtW",
+      "exists": true,
+      "executable": false,
+      "owner": "mnspJQyF1KdDEs5c6YJPocYdY1esBgVQFufM2dY9oDk"
+    },
+    "max_yield_staker_authority": {
+      "address": "stWirqFCf2Uts1JBL1Jsd3r6VBWhgnpdPxCTe1MFjrq",
+      "exists_as_account": false,
+      "note": "This is an authority PDA; absence of account data is not itself a failure."
+    },
+    "exit_authority": {
+      "address": "ex9CfkBZZd6Nv9XdnoDmmB45ymbu4arXVk7g5pWnt3N",
+      "exists": true,
+      "owner": "11111111111111111111111111111111"
+    },
+    "get_vote_accounts": {
+      "current": 0,
+      "delinquent": 0
+    }
+  },
+  "compatibility": {
+    "program_clone": "compatible",
+    "authority_assignment": "constructible_with_native_stake_instructions",
+    "automatic_delegation_and_rebalance": "blocked",
+    "exact_blocker": "Marinade Native assigns stake authority to a program PDA, then a Marinade-operated bot calls delegation instructions and the external API coordinates delegation and exit preparation. The mainnet operator does not observe or transact against an isolated local Surfpool ledger, and the local Surfpool has no Marinade operator or validator-set service. A cloned proxy program alone therefore cannot produce or prove a Marinade-managed delegation/rebalance state transition entirely inside Surfpool.",
+    "decision": "Use the full native Stake-program lifecycle for the complete Surfpool acceptance path; do not label it Marinade-managed staking."
+  },
+  "fallback_acceptance": {
+    "test": "crates/cooker-solana/tests/surfpool_stake_live.rs",
+    "required_transitions": [
+      "create_and_initialize",
+      "delegate",
+      "observe_authority_vote_and_raw_lamports",
+      "deactivate",
+      "surfpool_epoch_time_travel",
+      "withdraw_and_close"
+    ],
+    "last_live_result": "passed",
+    "principal_lamports": 1000000000,
+    "rent_lamports": 2282880,
+    "fee_lamports_per_transaction": 5000,
+    "time_travel_from_epoch": 1003,
+    "time_travel_to_epoch": 1006,
+    "postconditions_met": true
+  },
+  "primary_sources": [
+    "https://docs.marinade.finance/marinade-protocol/protocol-overview/marinade-native/marinade-native-api-and-sdk",
+    "https://docs.marinade.finance/developers/contract-addresses",
+    "https://docs.marinade.finance/marinade-protocol/protocol-overview/marinade-native"
+  ]
+}
