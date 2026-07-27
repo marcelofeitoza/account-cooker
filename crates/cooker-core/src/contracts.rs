@@ -187,12 +187,12 @@ pub trait StateStore: Send + Sync {
     fn append_trace(&self, event: &TraceEvent) -> Result<(), CookerError>;
 }
 
-/// Chain gateway restricted by its implementation to a verified Surfpool RPC.
+/// Chain gateway restricted by its implementation to a verified network endpoint.
 #[async_trait::async_trait]
 pub trait ChainGateway: Send + Sync {
     /// Simulate a signed transaction without submitting it.
     async fn simulate(&self, transaction: &[u8]) -> Result<SimulationReceipt, CookerError>;
-    /// Submit signed bytes, returning the deterministic local signature.
+    /// Submit signed bytes, returning the deterministic transaction signature.
     async fn submit(&self, transaction: &[u8]) -> Result<String, CookerError>;
     /// Look up and observe a transaction by signature.
     async fn observe(
@@ -202,7 +202,7 @@ pub trait ChainGateway: Send + Sync {
     ) -> Result<ChainReceipt, CookerError>;
     /// Read a native account balance in lamports.
     async fn native_balance(&self, address: &str) -> Result<u64, CookerError>;
-    /// Read the current Surfpool block height for expiry reconciliation.
+    /// Read the current network block height for expiry reconciliation.
     async fn block_height(&self) -> Result<u64, CookerError>;
 }
 
@@ -211,7 +211,7 @@ pub trait ChainGateway: Send + Sync {
 pub trait ActionAdapter: Send + Sync {
     /// Whether this adapter accepts the supplied payload.
     fn supports(&self, payload: &ActionPayload) -> bool;
-    /// Build and sign locally using a blockhash fetched from verified Surfpool.
+    /// Build and sign locally using a blockhash fetched from the verified gateway.
     async fn prepare(
         &self,
         context: &AdapterContext,

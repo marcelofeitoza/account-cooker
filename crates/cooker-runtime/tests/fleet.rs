@@ -1,5 +1,7 @@
 //! Durable multi-signer routing, bounded concurrency, and shutdown proofs.
 
+#![forbid(unsafe_code)]
+
 use std::{
     collections::BTreeMap,
     error::Error,

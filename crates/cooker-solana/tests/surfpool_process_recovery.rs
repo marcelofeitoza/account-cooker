@@ -1,5 +1,7 @@
 //! Real-process crash and restart proofs against the pinned local Surfpool harness.
 
+#![forbid(unsafe_code)]
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     env,

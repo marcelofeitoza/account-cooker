@@ -119,7 +119,7 @@ pub enum GatewayIdentity {
     PublicCluster(ClusterIdentity),
 }
 
-/// Latest blockhash plus the validity horizon returned by Surfpool.
+/// Latest blockhash plus the validity horizon returned by the verified endpoint.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LatestBlockhash {
     /// Context slot used for the response.
@@ -130,7 +130,7 @@ pub struct LatestBlockhash {
     pub last_valid_block_height: u64,
 }
 
-/// Current Surfpool epoch and slot position.
+/// Current network epoch and slot position.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EpochInfo {
     /// Current epoch.
@@ -143,7 +143,7 @@ pub struct EpochInfo {
     pub absolute_slot: u64,
     /// Current block height.
     pub block_height: u64,
-    /// Successful transaction count when Surfpool reports it.
+    /// Successful transaction count when the endpoint reports it.
     pub transaction_count: Option<u64>,
 }
 
@@ -167,14 +167,14 @@ pub struct LocalSignatureRecord {
     pub logs: Vec<String>,
 }
 
-/// Result of a local transaction simulation.
+/// Result of a transaction simulation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RpcSimulation {
     /// Context slot used for simulation.
     pub context_slot: u64,
     /// Structured transaction error, if execution failed.
     pub error: Option<Value>,
-    /// Program logs emitted by the local execution.
+    /// Program logs emitted by simulation.
     pub logs: Vec<String>,
     /// Compute units consumed when reported.
     pub units_consumed: Option<u64>,
@@ -183,28 +183,28 @@ pub struct RpcSimulation {
 /// Signature state returned by `getSignatureStatuses`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SignatureStatus {
-    /// Slot in which the local transaction was processed.
+    /// Slot in which the transaction was processed.
     pub slot: u64,
     /// Number of confirmations when known.
     pub confirmations: Option<u64>,
     /// Structured transaction error.
     pub error: Option<Value>,
-    /// Surfpool's confirmation status string.
+    /// Endpoint confirmation status string.
     pub confirmation_status: Option<String>,
 }
 
 /// Transaction metadata used for confirmation and postcondition evidence.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransactionRecord {
-    /// Slot containing the local transaction.
+    /// Slot containing the transaction.
     pub slot: u64,
-    /// Local block timestamp when reported.
+    /// Block timestamp when reported.
     pub block_time: Option<i64>,
     /// Transaction execution error.
     pub error: Option<Value>,
     /// Fee charged in lamports.
     pub fee: u64,
-    /// Program logs retained by Surfpool.
+    /// Program logs returned by the endpoint.
     pub logs: Vec<String>,
     /// Native balances before execution.
     pub pre_balances: Vec<u64>,
@@ -272,9 +272,9 @@ pub struct TokenBalanceRecord {
     pub account_index: usize,
     /// Token mint.
     pub mint: Pubkey,
-    /// Wallet owner when Surfpool reports it.
+    /// Wallet owner when the endpoint reports it.
     pub owner: Option<Pubkey>,
-    /// Token program when Surfpool reports it.
+    /// Token program when the endpoint reports it.
     pub program_id: Option<Pubkey>,
     /// Raw token units without decimal conversion.
     pub amount: u64,
@@ -282,7 +282,7 @@ pub struct TokenBalanceRecord {
     pub decimals: u8,
 }
 
-/// Raw account state read from the verified Surfpool endpoint.
+/// Raw account state read from the verified endpoint.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccountInfo {
     /// Context slot used for the read.
@@ -293,7 +293,7 @@ pub struct AccountInfo {
     pub owner: Pubkey,
     /// Whether this is executable program state.
     pub executable: bool,
-    /// Rent epoch reported by Surfpool.
+    /// Rent epoch reported by the endpoint.
     pub rent_epoch: u64,
     /// Decoded account bytes.
     pub data: Vec<u8>,
@@ -513,7 +513,7 @@ impl JsonRpcClient {
             let message = error
                 .get("message")
                 .and_then(Value::as_str)
-                .unwrap_or("Surfpool returned an unspecified JSON-RPC error");
+                .unwrap_or("RPC endpoint returned an unspecified JSON-RPC error");
             return Err(RpcError::json_rpc(method, code, message));
         }
         let result = envelope.get("result").ok_or_else(|| {
@@ -815,8 +815,8 @@ impl SolanaGateway {
     /// Connect to a named public Solana cluster and prove its genesis hash before returning.
     ///
     /// This is the only constructor that addresses a network outside loopback. It is reachable
-    /// only from source that names a [`PublicCluster`]; no configuration file, environment
-    /// variable, or CLI flag can reach it.
+    /// only from source that names a [`PublicCluster`]. Parsed application configuration and
+    /// CLI flags cannot select it; a dedicated source-declared harness may supply its URL.
     ///
     /// # Errors
     ///
@@ -906,7 +906,7 @@ impl SolanaGateway {
         &self.rpc.endpoint
     }
 
-    /// Fetch a confirmed recent blockhash from Surfpool.
+    /// Fetch a confirmed recent blockhash from the verified endpoint.
     ///
     /// # Errors
     ///
@@ -915,7 +915,7 @@ impl SolanaGateway {
         self.rpc.latest_blockhash().await
     }
 
-    /// Read a native account balance from Surfpool.
+    /// Read a native account balance from the verified endpoint.
     ///
     /// # Errors
     ///
@@ -933,7 +933,7 @@ impl SolanaGateway {
         self.rpc.block_height().await
     }
 
-    /// Read and decode an account from Surfpool.
+    /// Read and decode an account from the verified endpoint.
     ///
     /// # Errors
     ///
@@ -942,7 +942,7 @@ impl SolanaGateway {
         self.rpc.account(address).await
     }
 
-    /// Return the exact Surfpool rent-exempt minimum for an account data length.
+    /// Return the endpoint's rent-exempt minimum for an account data length.
     ///
     /// # Errors
     ///
@@ -954,7 +954,7 @@ impl SolanaGateway {
         self.rpc.minimum_balance_for_rent_exemption(data_len).await
     }
 
-    /// Return Surfpool's current epoch and absolute slot.
+    /// Return the endpoint's current epoch and absolute slot.
     ///
     /// # Errors
     ///
@@ -963,7 +963,7 @@ impl SolanaGateway {
         self.rpc.epoch_info().await
     }
 
-    /// Return Surfpool's current native stake minimum delegation.
+    /// Return the endpoint's current native stake minimum delegation.
     ///
     /// # Errors
     ///
@@ -972,7 +972,7 @@ impl SolanaGateway {
         self.rpc.stake_minimum_delegation().await
     }
 
-    /// Return active validator vote accounts visible through the Surfpool mainnet fork.
+    /// Return active validator vote accounts visible through the endpoint.
     ///
     /// # Errors
     ///
@@ -1011,7 +1011,7 @@ impl SolanaGateway {
         self.rpc.local_signatures(limit).await
     }
 
-    /// Simulate signed wire bytes locally with signature verification enabled.
+    /// Simulate signed wire bytes through the verified endpoint with signature verification.
     ///
     /// # Errors
     ///
@@ -1023,17 +1023,17 @@ impl SolanaGateway {
         self.rpc.simulate_transaction(transaction).await
     }
 
-    /// Submit signed wire bytes only to the verified local Surfpool endpoint.
+    /// Submit signed wire bytes to the verified endpoint.
     ///
     /// # Errors
     ///
-    /// Returns a classified [`RpcError`]. Failures after the request may have reached Surfpool are
-    /// classified as an unknown outcome and must be reconciled by local signature.
+    /// Returns a classified [`RpcError`]. Failures after the request may have reached the
+    /// endpoint are classified as an unknown outcome and must be reconciled by signature.
     pub async fn send_transaction(&self, transaction: &[u8]) -> Result<Signature, RpcError> {
         self.rpc.send_transaction(transaction).await
     }
 
-    /// Read a local transaction signature status.
+    /// Read a transaction signature status.
     ///
     /// # Errors
     ///
@@ -1045,7 +1045,7 @@ impl SolanaGateway {
         self.rpc.signature_status(signature).await
     }
 
-    /// Read a confirmed local transaction and its execution metadata.
+    /// Read a confirmed transaction and its execution metadata.
     ///
     /// # Errors
     ///
@@ -1081,7 +1081,7 @@ impl ChainGateway for SolanaGateway {
         if &returned != expected {
             return Err(RpcError::invalid_response(
                 SEND_TRANSACTION,
-                "Surfpool returned a signature different from the signed transaction",
+                "RPC endpoint returned a signature different from the signed transaction",
             )
             .into());
         }

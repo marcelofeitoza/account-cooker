@@ -1,5 +1,7 @@
 //! Successful chain acceptance tests run only against the pinned local Surfpool harness.
 
+#![forbid(unsafe_code)]
+
 use std::{io, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 use chrono::Utc;

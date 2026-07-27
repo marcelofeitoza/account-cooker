@@ -6,7 +6,7 @@ focused runs cannot be cited as canonical results.
 
 ## 1. Quality Gates
 
-The draft PR remains draft until these pass from a clean checkout:
+These gates passed from clean checkouts before PR 2 was marked ready for review:
 
     cargo fmt --all -- --check
     ./scripts/check-lint-policy.sh
@@ -26,7 +26,7 @@ The draft PR remains draft until these pass from a clean checkout:
 `--quick` exists only to rehearse the harness at reduced dimensions.
 
 `scripts/check-lint-policy.sh` is the machine-checkable form of two declared postures. It
-fails if any workspace crate root drops its explicit `#![forbid(unsafe_code)]`, if a crate
+fails if any Cargo target root drops its explicit `#![forbid(unsafe_code)]`, if a crate
 stops inheriting the workspace lint table, if the workspace lint itself stops forbidding
 unsafe code, or if `.cargo/audit.toml` stops denying advisory warnings. `cargo audit` reads
 that same `.cargo/audit.toml`, so an unmaintained, unsound, or yanked dependency now fails
@@ -90,7 +90,8 @@ has no `lint_policy` key, while a fresh canonical run emits one.
 ### Adapter tests
 
 - mock only error/transport boundaries in unit tests;
-- execute every successful chain path through Surfpool;
+- execute every canonical successful chain path through Surfpool; the separate ignored
+  devnet native-transfer test uses the same adapter through the public-cluster gateway;
 - assert both signature outcome and protocol-specific state changes;
 - test deterministic, transient, unknown, and policy errors.
 
@@ -121,14 +122,14 @@ has no `lint_policy` key, while a fresh canonical run emits one.
 | six process checkpoints | real child processes plus Surfpool | `SIGKILL`, reopen, exact submit/signature/state deltas, one terminal result |
 | historical rollback | runtime/store integration plus live re-audit | orphan correction never resubmits |
 | Surfpool restart | Surfpool soak | resume same database/Surfnet with no funding reset |
-| Surfpool profiler isolation | start/session provenance | instruction profiling disabled for sustained execution |
+| Surfpool profiler isolation | start/session provenance | instruction profiling disabled for canonical soak execution |
 | Surfpool datasource isolation | start/session provenance | offline snapshot mode; no lazy public-RPC account misses |
 | concurrent workers | runtime integration plus Surfpool soak | bounded workers and one wallet lease |
 | budget exhaustion | policy/property tests | no transaction signature beyond limit |
 | kill switch | CLI/runtime tests | no network, signer load, claim, or state change |
 | compressed soak | Surfpool soak | zero duplicate or unresolved actions/signatures |
-| public cluster identity | unit plus devnet soak | configuration cannot reach a public endpoint; the devnet gateway proves a pinned genesis hash |
-| bounded public devnet run | devnet soak | same invariants on a real cluster, with the confirmation rate measured rather than asserted |
+| public cluster identity | unit plus devnet run | application configuration and CLI cannot select a public cluster; the source-declared devnet gateway proves a pinned genesis hash |
+| bounded public devnet run | ignored devnet test | named engine invariants on public devnet, with the confirmation rate measured rather than asserted |
 
 ## 4. Scale Runs
 
@@ -171,7 +172,10 @@ Its gate asserts only what the engine controls:
 - the injected response loss reconciles to a confirmation without resubmission;
 - exact source debit and destination credit for every confirmed action;
 - the payer balance equation closes over confirmed transfers plus observed fees;
-- one full runtime-stack restart recovered from the WAL file mid-run;
+- one in-process reconstruction: the first runtime is dropped, then a new runtime is built
+  with a reopened store handle, reloaded signer, fresh policy, adapter, context, and clock,
+  plus the original gateway object; the Account Cooker OS process and Tokio runtime remain;
+- evidence action records appear in ascending planned sequence order;
 - every unconfirmed action carries a classified cause, and the causes sum to the unconfirmed
   count, so a non-inclusion can never be reported without a reason.
 
@@ -181,7 +185,7 @@ reporting it. Full signatures are committed so a reviewer can check both the con
 and the non-inclusions against the cluster directly.
 
 Read [the devnet run and topology delta](DEVNET.md) before comparing the two runs. It states
-which loopback measurements carry over to a public network and which do not.
+what the run directly establishes and which live-network properties remain unmeasured.
 
 ## 5. Evaluation Runs
 
@@ -315,14 +319,14 @@ README, CLI help, architecture, threat model, and evidence must agree on:
 - metrics actually reported;
 - common-funder limitation;
 - safety exclusions;
-- draft status.
+- review status.
 
 No checklist is marked complete from a stub, compilation alone, mocked success, or an
 instruction fixture without a successful Surfpool state transition.
 
-## 10. Draft Exit Gate
+## 10. Completed Review Readiness Gate
 
-The PR can leave draft only after:
+PR 2 was marked ready for review only after:
 
 - all mandatory commands pass twice from clean Surfpool state;
 - a fresh clone follows the quick start successfully;
@@ -332,9 +336,9 @@ The PR can leave draft only after:
 - a comparative report is committed;
 - unsupported privacy claims are absent;
 - the published-policy eligibility audit is current;
-- Marcelo approves final submission.
+- Marcelo approves the human submission.
 
 The dated audit in `ELIGIBILITY.md` records that `HUMAN_ONLY` blocks agent-API submission,
 while the listing and platform terms contain no prohibition on disclosed AI assistance by a
-human entrant. Engineering completion does not replace Marcelo's country/account
-attestations, final review, or manual submission decision.
+human entrant. Engineering completion did not establish Marcelo's country or account
+eligibility; those attestations, the final review, and submission remained human controls.

@@ -1,5 +1,7 @@
 //! Live failure and signature-reconciliation acceptance against Surfpool.
 
+#![forbid(unsafe_code)]
+
 use std::{io, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 use chrono::Utc;

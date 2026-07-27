@@ -1,5 +1,7 @@
 //! End-to-end tests for offline CLI parsing, output, and failure semantics.
 
+#![forbid(unsafe_code)]
+
 use std::{fs, path::Path};
 
 use account_cooker::{Cli, execute};

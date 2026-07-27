@@ -193,7 +193,7 @@ pub enum ActionState {
     Planned,
     /// Transaction simulation passed.
     Simulated,
-    /// A locally signed transaction may have reached Surfpool.
+    /// A locally signed transaction may have reached the configured network.
     Submitted,
     /// Confirmation and expected state changes were observed.
     Confirmed,
@@ -364,7 +364,7 @@ pub struct PreparedAction {
     pub transaction: Vec<u8>,
     /// Blockhash used during signing.
     pub recent_blockhash: String,
-    /// Last valid block height reported by Surfpool.
+    /// Last valid block height reported by the verified gateway.
     pub last_valid_block_height: u64,
     /// State changes that must be observed before success.
     pub expectations: Vec<StateExpectation>,
@@ -408,7 +408,7 @@ pub struct ChainReceipt {
     pub signature: String,
     /// Observed confirmation status.
     pub status: ConfirmationStatus,
-    /// Slot reported by Surfpool.
+    /// Slot reported by the verified gateway.
     pub slot: Option<u64>,
     /// Observed time.
     pub observed_at: DateTime<Utc>,
@@ -423,7 +423,7 @@ pub struct ChainReceipt {
 /// Context supplied to an action adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdapterContext {
-    /// Local Surfpool RPC URL.
+    /// Verified gateway RPC URL.
     pub rpc_url: url::Url,
     /// Base58 signer address.
     pub signer: String,

@@ -1,8 +1,7 @@
 # Account Cooker Master Plan
 
 Status: Blocks A-F, the canonical release proof, the published-policy eligibility audit,
-and the draft PR handoff are complete. Marcelo's final human review and submission decision
-remain before the draft can leave draft state.
+and the PR handoff are complete. PR 2 is open and ready for review.
 
 This document is the public implementation and release contract for the bounty build. It
 defines what is implemented, what evidence is still required, which claims are permitted,
@@ -17,21 +16,20 @@ and which features remain outside the completion boundary.
 | C | native SOL, SPL, Jupiter, and native stake through Surfpool | complete |
 | D | crash, unknown outcome, restart, rollback audit, budget, kill switch | complete |
 | E | evaluator, security/provenance, public docs, Obsidian record | complete |
-| F | canonical soaks, sanitized evidence, two clean-clone proofs, draft PR handoff | complete |
+| F | canonical soaks, sanitized evidence, two clean-clone proofs, PR handoff | complete |
 
 Blocks A-E describe implemented source and focused verification. Block F adds clean-tree
-canonical evidence, two independent clean-clone reproductions, and the updated public draft
-handoff. The contribution intentionally stays draft for Marcelo's human decision.
+canonical evidence, two independent clean-clone reproductions, and the public PR handoff.
 
 ## 1. Objective
 
 Build a production-shaped Rust account activity engine that:
 
-1. Schedules thousands of persistent agents without one task per wallet.
+1. Schedules the 1,000-agent canonical fleet without one task per wallet.
 2. Produces stateful, policy-constrained Solana actions through reusable adapters.
 3. Recovers deterministically after process, RPC, and transaction failures.
 4. Evaluates behavioral and graph leakage against declared attacker features.
-5. Proves all chain-facing behavior through reproducible Surfpool scenarios.
+5. Proves all canonical chain-facing behavior through reproducible Surfpool scenarios.
 
 The result must be useful even when the evaluator finds that a behavior model is
 distinguishable. The system reports failed privacy hypotheses rather than hiding them.
@@ -54,10 +52,12 @@ The following decisions are fixed for the complete deliverable:
 - Claim policy: no anonymity or indistinguishability claim without evaluator evidence.
 - Safety policy: no wash trading, self-trading, governance voting, referral farming,
   fake engagement, NFT bidding, dust spam, bridge churn, or uncontrolled live execution.
-- Secret policy: no private key, seed, raw RPC credential, or unredacted trace in Git.
+- Secret policy: no private key, seed, raw RPC credential, or unredacted local trace in Git.
+  The separate devnet record commits public transaction signatures for verification.
 
-Unit and property tests may run in process. Every RPC path, adapter, confirmation path,
-recovery path, and executable soak must also pass through Surfpool.
+Unit and property tests may run in process. Every canonical adapter, confirmation, recovery,
+and executable soak path must also pass through Surfpool. The sole public-network exception
+is the source-declared, ignored devnet native-transfer run described in `docs/DEVNET.md`.
 
 ## 3. Definition Of Success
 
@@ -89,7 +89,8 @@ The bounty build is complete only when every mandatory gate is green:
 - Deterministic persona/session generator and priority-queue scheduler.
 - SQLite WAL store with schema migrations, leases, idempotency, and reconciliation.
 - Controller and bounded worker runtime.
-- Surfpool-only RPC guard and network bootstrap scripts.
+- Loopback-only application configuration guard, source-declared devnet test boundary, and
+  Surfpool network bootstrap scripts.
 - Ephemeral local signer provider with strict file permissions.
 - Native SOL transfer, SPL transfer, Jupiter swap, and one stateful lifecycle.
 - Policy engine with budgets, allowlists, cooldowns, slippage, and loss limits.
@@ -408,7 +409,7 @@ Stake is deliberately last because its epoch travel is irreversible inside that 
 process. The separate compressed soak proves bounded concurrent execution, one lost send
 response, runtime reconstruction, persistent Surfpool restart, and reconciliation.
 
-Every integration test starts or targets a named, isolated Surfnet and records:
+Every Surfpool chain-acceptance group starts or targets a named, isolated Surfnet and records:
 
 - Surfpool version;
 - offline datasource mode;
@@ -421,7 +422,9 @@ Every integration test starts or targets a named, isolated Surfnet and records:
 
 ## 14. Security And Abuse Controls
 
-- Surfpool-only endpoint validation is enforced in code, not just documentation.
+- Application configuration enforces loopback Surfpool endpoints in code. The separate
+  ignored devnet test constructs a named public cluster in source and verifies its genesis
+  hash before loading a signer.
 - Generated local key files are mode 0600 and ignored by Git.
 - Logs contain aliases and public keys only where necessary; no secret material.
 - Config redaction is tested.
@@ -484,7 +487,7 @@ The complete evidence requirements are in docs/VALIDATION.md.
 - Generated and reviewed the sanitized checksum-bearing `evidence/final` pack.
 - Reproduced the complete canonical command twice from fresh clones and fresh offline
   Surfpool state; deterministic metrics and all five virtual trace hashes match.
-- Pushed the implementation and evidence commits and updated draft PR 2 with measured
+- Pushed the implementation and evidence commits and updated PR 2 with measured
   results, limitations, provenance, and reviewer entry points.
 - Audited the live listing, platform agent rules, and terms. `HUMAN_ONLY` requires Marcelo's
   human submission path; no published rule prohibits disclosed AI assistance.
@@ -507,13 +510,12 @@ stake is the tested stateful fallback and is not represented as Marinade. A revi
 instruction fixture is accepted only with a successful Surfpool simulation, confirmation,
 and state transition.
 
-## 18. Draft PR And Evidence State
+## 18. PR And Evidence State
 
-Draft PR 2 contains the complete implementation, measured result, limitations, canonical
-evidence links, and clean-clone verification. It remains draft even though every mandatory
-engineering gate passes, because Marcelo owns the final human review and submission
-decision. Only the checksum-bearing canonical pack tied to its exact clean commit supports
-scale, transaction, or metric claims.
+PR 2 contains the complete implementation, measured result, limitations, canonical evidence
+links, and clean-clone verification. It is open and ready for review. Only the
+checksum-bearing canonical pack tied to its exact clean commit supports scale, transaction,
+or metric claims.
 
 ## 19. Eligibility Audit And Sponsor Questions
 
@@ -524,14 +526,13 @@ listing's `HUMAN_ONLY` value blocks agent-API submission. Neither the listing no
 terms prohibit AI-assisted implementation by a human entrant. The PR discloses assistance,
 and no agent submission was attempted.
 
-These remaining questions can affect sponsor preference or scoring, but they are not
-published eligibility blockers and do not relax any safety or evidence gate:
+These questions were open at engineering handoff and did not relax any safety or evidence
+gate:
 
 - Must the PR be merged, or only publicly reviewable, before the deadline?
 - What exact attacker and metric should satisfy statistically indistinguishable?
 - Are unsafe examples such as governance voting and artificial protocol activity optional?
 - Does Rust end to end allow shell runbooks and generated JSON evidence?
-- Can one participant win more than one repository track?
 
 ## 20. Final Definition Of Done
 
@@ -551,4 +552,4 @@ Done means a new reviewer can:
     unsupported claims.
 
 All eleven conditions are satisfied by the canonical pack and its two clean-clone
-reproductions. The PR stays draft only until Marcelo approves the final human submission.
+reproductions. PR 2 is open and ready for review.

@@ -1,5 +1,7 @@
 //! Durable runtime lifecycle and six-checkpoint restart proof.
 
+#![forbid(unsafe_code)]
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,

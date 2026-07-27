@@ -52,7 +52,7 @@ pub enum ExecutionResult {
         /// Stable local signature.
         signature: String,
     },
-    /// Surfpool confirmed transaction failure.
+    /// The network confirmed transaction failure.
     Failed {
         /// Sanitized chain failure.
         reason: String,
@@ -303,7 +303,7 @@ impl RuntimeEngine {
         if !simulation.succeeded {
             let reason = simulation
                 .error
-                .unwrap_or_else(|| "Surfpool simulation failed".to_owned());
+                .unwrap_or_else(|| "transaction simulation failed".to_owned());
             let now = self.clock.now();
             let trace = terminal_trace(
                 action,
@@ -362,7 +362,7 @@ impl RuntimeEngine {
             Ok(signature) if signature == prepared.signature => signature,
             Ok(signature) => {
                 let reason = format!(
-                    "Surfpool returned signature {signature}, expected {}",
+                    "gateway returned signature {signature}, expected {}",
                     prepared.signature
                 );
                 return self.mark_unknown(lease, Some(prepared.signature), reason);
@@ -476,7 +476,7 @@ impl RuntimeEngine {
     ///
     /// # Errors
     ///
-    /// Returns an error when signed bytes are absent, lease ownership is invalid, Surfpool
+    /// Returns an error when signed bytes are absent, lease ownership is invalid, gateway
     /// observation fails, or a durable transition invariant is violated.
     pub async fn reconcile(&self, lease: &ActionLease) -> Result<ExecutionResult, CookerError> {
         let action = self.store.get_action(&lease.action_id)?;
@@ -594,7 +594,7 @@ impl RuntimeEngine {
                 let reason = receipt
                     .error
                     .clone()
-                    .unwrap_or_else(|| "Surfpool confirmed transaction failure".to_owned());
+                    .unwrap_or_else(|| "network confirmed transaction failure".to_owned());
                 self.store.record_receipt(lease, receipt)?;
                 let trace =
                     receipt_trace(&action, receipt, TraceOutcome::Failed, &self.context.signer);

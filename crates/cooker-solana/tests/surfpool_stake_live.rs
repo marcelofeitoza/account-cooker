@@ -1,5 +1,7 @@
 //! Live native-stake lifecycle acceptance against the pinned local Surfpool harness.
 
+#![forbid(unsafe_code)]
+
 use std::{
     io,
     path::{Path, PathBuf},

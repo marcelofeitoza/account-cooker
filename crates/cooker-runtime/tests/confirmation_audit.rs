@@ -1,5 +1,7 @@
 //! Durable post-confirmation auditing and rollback recovery proofs.
 
+#![forbid(unsafe_code)]
+
 use std::{
     collections::BTreeMap,
     error::Error,

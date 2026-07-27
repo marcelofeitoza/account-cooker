@@ -1,10 +1,10 @@
 # Public Devnet Run And Topology Delta
 
-Status: one bounded sustained run against public Solana devnet is committed, with full
-transaction signatures that resolve on a public explorer. The loopback Surfpool results are
-unchanged and stay the canonical acceptance evidence. This document exists because a
-loopback result cannot, by itself, say anything about public-network topology, and several
-of the project's measurements quietly depend on that topology.
+Status: one 621.9-second bounded native-transfer run against public Solana devnet is
+committed, with full transaction signatures that resolved on a public explorer immediately
+after the run. The loopback Surfpool results are unchanged and stay the canonical acceptance
+evidence. This document exists because a loopback result cannot, by itself, establish
+public-network behavior.
 
 This is not a sustained-load proof, and devnet is not mainnet. Section 6 states exactly what
 that costs.
@@ -15,17 +15,25 @@ that costs.
 bounded native-SOL workload against `https://api.devnet.solana.com` using the same
 components as the loopback soak: the same SQLite store and migrations, the same
 `RuntimeEngine` and bounded worker pool, the same `SafetyPolicy`, and the same
-`NativeTransferAdapter`. Only the gateway target differs.
+`NativeTransferAdapter`. It reuses those application components, while the gateway mode, run
+size, pacing, and public-network controls are specific to this run.
+
+The committed record is one payer sending 200 transfers. Every action uses the System Program
+and transfers exactly 1,000,000 lamports to a unique deterministic destination. This is not a
+multi-payer fleet, sustained-load, behavioral, or anonymity evaluation.
 
 The run also reproduces the two durability scenarios from the loopback soak that are
 network independent:
 
 - one injected send-response loss, reconciled by signature without resubmission;
-- one full runtime-stack restart, where every process-local component is dropped and rebuilt
-  from the durable WAL file mid-run.
+- one in-process execution-component reconstruction. The first `RuntimeEngine` is dropped.
+  A new engine is constructed with a reopened store handle, reloaded signer, fresh
+  `SafetyPolicy`, `NativeTransferAdapter`, `AdapterContext`, and `SystemClock`, plus the
+  original `SolanaGateway` object. The Account Cooker OS process and Tokio runtime remain
+  alive. Action state is read from the same SQLite database operating in WAL mode.
 
-The Surfpool process restart from the loopback soak has no devnet counterpart. A public
-cluster cannot be restarted, so that provenance is absent here rather than faked.
+The Surfpool process restart from the loopback soak has no devnet counterpart. This harness
+does not control public-cluster processes, so that provenance is absent here.
 
 **No on-chain program is deployed by this project.** Account Cooker has no program of its
 own; it composes existing Solana programs. Every transaction in this run is a System Program
@@ -54,14 +62,14 @@ before a signer is loaded.
 Leaving loopback requires naming the cluster in Rust source. `RpcEndpoint::public_cluster`
 takes a `PublicCluster` value; the `FromStr` and `TryFrom<Url>` paths that parsed
 configuration can reach still accept loopback addresses only. The `cooker` CLI has no
-public-network execution path, `scripts/full-demo.sh` never runs this soak, and CI never
+public-network execution path, `scripts/full-demo.sh` never runs this test, and CI never
 runs it either: the test carries `#[ignore]` and CI runs only the default test set.
 
 The gateway paces itself under the endpoint's published request, per-method, and connection
 ceilings, and retries transient read failures with bounded exponential backoff.
 `sendTransaction` is never retried, so a failed send stays an ambiguous outcome that only
 signature reconciliation can settle. Those limiters are active for public-cluster endpoints
-only; loopback behavior is byte-for-byte what it was.
+only; loopback requests do not use the public pacing and retry policy.
 
 The pacing constants were tuned against the real endpoint, and the tuning is itself a result
 worth reporting. The endpoint publishes its budgets in `x-ratelimit-*` response headers,
@@ -71,17 +79,23 @@ counters are a budget for a source address rather than for one process. Successi
 130 ms and then 200 ms between requests still drew HTTP 429 responses, so the committed
 setting is a small fraction of the reported ceiling.
 
-No rejection lost or duplicated an action. A rejected read was retried; a rejected send
-became an ambiguous outcome that reconciliation settled by signature. They did make the run
-slow, and they are the reason a bounded run takes tens of minutes rather than the seconds
-the same workload takes on loopback.
+In the abandoned attempts, rejected reads were retried and rejected sends became ambiguous
+outcomes for signature reconciliation rather than automatic resubmission. The committed run
+recorded no rejected send. Its 621.9-second duration reflects the conservative pacing selected
+after those attempts plus public RPC and inclusion latency.
 
 ## 3. Committed Evidence
 
-`evidence/devnet/devnet-soak.json` carries the full run record, including every transaction
-signature in submission order with its state, slot, and exact fee. Signatures are committed
-verbatim rather than redacted: a devnet signature is public record, and redacting it would
-destroy the only thing that makes this run checkable by someone else.
+`evidence/devnet/devnet-soak.json` carries one record per planned action in ascending
+`sequence` order, not submission or confirmation order. Each record carries its terminal
+state, signature when one was persisted, slot when confirmed, exact fee, and destination.
+Signatures are committed verbatim rather than redacted: a devnet signature is public record,
+and redacting it would remove the main independently checkable identifier.
+
+The committed schema-2 file is a post-run truth correction of the original schema-1 record,
+not a second devnet run. Its `evidence_revision` object preserves the original checksum and
+states that no transaction record or measurement changed. Only the reconstruction labels,
+scenario wording, and explicit record-order metadata changed.
 
 Check any confirmed signature at:
 
@@ -104,9 +118,11 @@ which is exactly what the engine claimed about it.
 ## 4. Measured Results
 
 The committed run submitted 200 transactions, all 200 confirmed with proven postconditions,
-in 622 seconds of wall time at 0.32 confirmations per second, landing in 200 distinct slots
-across slots 479,323,050 to 479,324,740 of epoch 1109. Five signatures spread across the run
-were spot checked against the cluster afterwards and each matched the recorded slot and fee.
+in 621.9 seconds of wall time at 0.323 confirmations per submission-batch second. Confirmed
+transactions landed in 200 distinct slots from 479,323,073 through 479,324,703 in epoch 1109;
+the before and after observations span absolute slots 479,323,050 through 479,324,740. Five
+records selected across the planned sequence were spot checked against the cluster immediately
+after the run, and each matched the recorded slot and fee.
 
 See `evidence/devnet/README.md` for the full numbers, the invariant table, the loopback
 comparison, and an account of the earlier attempts that were abandoned rather than
@@ -120,83 +136,72 @@ This is the section the evidence exists to support.
 
 | Property | Loopback Surfpool | Public devnet |
 |---|---|---|
-| Consensus | none; a single local surfnet produces blocks by itself | real leader schedule, votes, and fork choice |
-| Inclusion decision | effectively an in-process call that always lands | the current or next slot leader decides, and may drop the transaction |
-| Competing traffic | none; every block contains only this run | shared blocks with all other devnet traffic |
-| RPC | localhost, plain HTTP, no rate limit, sub-millisecond | shared TLS endpoint with request, per-method, and connection ceilings, all per source address |
-| Latency | negligible | real internet round trips plus block time |
+| Consensus | no validator consensus measured; one isolated Surfpool process | public devnet consensus topology, not independently evaluated by this run |
+| Inclusion decision | local RPC to one isolated Surfpool process; all canonical soak actions landed | the public cluster can include or drop a submitted transaction |
+| Competing traffic | isolated process with no configured external transaction source | shared public cluster |
+| RPC | loopback HTTP with no public-provider quota in this harness | shared TLS endpoint with request, per-method, and connection ceilings, all per source address |
+| Observed end-to-end rate | 27.091 transactions/s in the 1,000-transaction canonical soak | 0.323 confirmations/s during submission batches in this 200-transaction run |
 | Clock | controllable; the harness time-travels across epochs | not controllable; slot progression is external |
-| Blockhash expiry | never reached in practice | a hard 150-slot deadline that abandoned faster-paced attempts did hit |
-| Fee market | static base fee only | base fee plus a real priority-fee market under load |
+| Blockhash expiry | not observed in the committed canonical soak | signature absence through expiry occurred in an abandoned pilot |
+| Fee market | canonical transfers paid the local base fee | committed transfers paid 5,000 lamports each and did not exercise a priority fee |
 | Account state | frozen mainnet-fork snapshot pinned by hash | live cluster state that moves under the run |
-| Restartability | the validator process can be killed and resumed mid-run | not possible |
+| Harness restart control | the local Surfpool process can be killed and resumed mid-run | the harness cannot restart the public cluster |
 
 ### 5.2 Which claims depend on that difference
 
 The evaluator's attacks read behavioral features off the action trace. They split cleanly:
 
-**Unaffected by topology.** Amounts, action sequence, destination reuse, route, fee payer,
-funding graph, balance rank, and consolidation shape are properties of the transactions
-themselves. The same signed bytes produce the same features whichever network executes them.
-Every loopback evaluator result that rests only on these features carries over unchanged.
+**Not reevaluated by topology.** The evaluator scores planned synthetic action traces. Network
+execution topology is not one of its inputs, so the committed evaluator values do not change
+because this separate devnet run exists. This does not prove that signed transactions, realized
+timing, action loss, or public-network observations are equivalent across networks.
 
-**Affected, in the defender's favor.** Timing features. On loopback the on-chain timestamp
-is essentially the scheduler's intended timestamp, so an attacker reading timestamps reads
-the scheduler almost directly. On a public network, inclusion delay, leader rotation, and
-variable block time insert noise between the intended schedule and the timestamp an analyst
-observes. That noise works against the attacker, so the loopback timing numbers are, if
-anything, pessimistic for the defender. This is an argument from mechanism, not a
-measurement: the evaluator has not been rerun on public-network timestamps.
+**Timing direction is unknown.** Public inclusion delay, leader rotation, and variable block
+time can perturb the relationship between intended schedule and observed timestamp. That may
+help or hurt linkage depending on the attacker and feature. The evaluator was not rerun on
+public-network timestamps, so this project reports no direction or privacy gain from that
+perturbation.
 
-**Affected, against the defender.** Synchrony features. Inclusion granularity on a public
-network is the slot, roughly 400 ms. Two fleet agents the scheduler deliberately separated by
-less than a slot can land in the same block and look perfectly synchronized to an observer,
-an artifact loopback cannot produce because there is no slot contention. The bounded run
-gives one data point: its 200 confirmed transactions landed in 200 distinct slots, so no two
-of them collapsed into the same block. That is expected at 0.32 transactions per second and
-says nothing about the effect at fleet scale, where the whole point is many agents acting in
-the same minute. Characterizing slot collapse needs a run whose submission rate approaches
-one transaction per slot, which the shared endpoint's rate budget does not allow.
+**Synchrony was not tested at fleet scale.** Public inclusion granularity and contention can
+place multiple submitted actions in one slot. The bounded run gives one data point: its 200
+confirmed transactions landed in 200 distinct slots. At 0.323 confirmations per second from
+one payer, that does not characterize multi-agent synchrony or show how either network behaves
+near one transaction per slot.
 
 **An adversary loopback cannot represent at all.** The infrastructure observer. On loopback
 there is no third party between the controller and the chain, so the threat model's
-infrastructure observer is purely hypothetical. On a public network it is real and concrete:
-one RPC provider sees every request from one source address, in order, with timing, before
-inclusion. A fleet run this way is trivially linkable at the RPC layer no matter how good its
-on-chain behavior is. Nothing in this project defends that channel, and the devnet run makes
-the gap concrete rather than theoretical. Any real deployment would need separate endpoints
-or network isolation per agent, which is out of scope here and is not claimed.
+infrastructure observer is purely hypothetical. On a public network it is concrete: one RPC
+provider can observe requests from one source address and their arrival timing before
+inclusion. Nothing in this project defends RPC or IP correlation, and this single-endpoint run
+does not evaluate it. Separate endpoints or network isolation may change that exposure, but
+they are out of scope and untested here.
 
-**A channel loopback cannot show at all.** Action loss. Two distinct mechanisms drop actions
-on a public network and neither exists on loopback. The committed run lost none, but earlier
-attempts at a higher request rate against the same endpoint lost several, so the mechanisms
-are real rather than hypothetical. A transaction can reach the cluster and
-never be included before its blockhash expires, and a request can be rejected by the shared
-RPC endpoint's rate limiter before the cluster ever sees it. The committed evidence separates
-these two causes rather than merging them into one failure count, because they mean different
-things: the first is the cluster declining, the second is the operator's own endpoint budget.
-Either way the intended action does not happen, so the realized behavior distribution drifts
-from the planned one in a way it never does on loopback. The evaluator scores the planned
-trace. Scoring realized public-network traces is not done here and is an open gap, stated as
-such.
+**Public execution can leave planned actions unrealized.** The committed run lost none.
+Operator-observed abandoned attempts produced explicit HTTP 429 send rejections and signatures
+that remained absent through blockhash expiry. An explicit edge rejection proves the endpoint
+did not accept that request. Signature absence through expiry does not, by itself, prove
+whether the endpoint or cluster received the send. The evidence schema keeps these outcomes
+separate. Scoring realized public-network traces is not done here; the evaluator scores planned
+synthetic traces. The committed loopback soak had no unrealized action, while fault tests cover
+other local failure paths.
 
 ### 5.3 Which loopback numbers carry over
 
-**Carry over, and were re-proven on devnet.** Every durability invariant: no duplicate
-logical intent under repeated enqueue, no duplicate signature, exact per-transaction source
-debit and destination credit, budget and fee ceilings enforced, ambiguous submissions
-reconciled by signature without resubmission, and a full runtime-stack restart recovered
-from the WAL file mid-run.
+**Re-proven on devnet.** The run established no duplicate logical intent under repeated
+enqueue, no duplicate signature, exact per-transaction source debit and destination credit,
+budget and fee ceilings, and ambiguous-submission reconciliation by signature without
+resubmission. It also established the in-process component reconstruction described in
+section 1. It did not restart the Account Cooker process. The same `SolanaGateway` object was
+reused; HTTP and TLS connection reuse was not instrumented.
 
-**Do not carry over.** Throughput and latency. The loopback soak is bounded by the engine;
-the devnet run is bounded by the shared RPC endpoint's rate budget, which is a property of the
-endpoint and the source address, not of the engine. The committed devnet run confirmed every
-planned action, but that is a measurement at one pacing setting at one moment, not a property
-that transfers: faster-paced attempts against the same endpoint lost transactions, and a
-loopback run cannot lose one at all. Nothing that depends on Surfpool-only RPC carries over
-either. `surfnet_getSurfnetInfo`, epoch and slot time travel, and local signature listing have
-no public-cluster equivalent, so the stake lifecycle acceptance path, which advances Surfpool
-across epochs deliberately, stays loopback only.
+**Do not carry over.** Throughput and latency. The runs differ in transaction count, client
+pacing, gateway mode, and network, and neither experiment isolates a single bottleneck. Their
+observed rates are therefore not comparable engine or endpoint capacities. Faster abandoned
+devnet attempts encountered HTTP 429 responses and signature absence through expiry. Nothing
+that depends on Surfpool-only RPC carries over either. `surfnet_getSurfnetInfo`, epoch and slot
+time travel, and local signature listing have no public-cluster equivalent, so the stake
+lifecycle acceptance path, which advances Surfpool across epochs deliberately, stays
+loopback only.
 
 **Established by neither.** The evaluator's privacy metrics against public-network
 timestamps and public-network transaction loss. Both runs measure the engine. Neither
@@ -204,25 +209,24 @@ measures whether a fleet looks like human traffic on a live cluster.
 
 ## 6. Bounds On This Result
 
-- Devnet is not mainnet. It carries far lower and more erratic load, no meaningful
-  priority-fee competition, and a validator set that usually runs ahead of mainnet.
-  Contention and fee-market behavior under real economic pressure are untested.
-- A bounded run is not a sustained-load proof. The run submits a few hundred transactions
-  from one payer over tens of minutes. It says nothing about hours of continuous operation,
-  memory or database growth over time, or behavior across a devnet epoch boundary or restart.
+- Devnet is not mainnet. Its topology and economics differ, and this run did not measure
+  relative load, validator behavior, contention under economic demand, or a priority-fee
+  market.
+- A bounded run is not a sustained-load proof. The run submits 200 transactions from one
+  payer over 621.9 seconds, about 10.4 minutes. It says nothing about hours of continuous
+  operation, memory or database growth over time, or behavior across a devnet epoch boundary
+  or Account Cooker OS-process restart.
 - One payer, one process, one RPC endpoint, one region. Nothing here tests a distributed
   controller or multiple endpoints.
-- The confirmation rate is a measurement of this endpoint at this moment, not a service
-  level. The evidence gate deliberately asserts the engine invariants and only reports the
-  confirmation rate, because inclusion is the cluster's decision and gating on it would
-  reward tuning the number rather than reporting it.
+- The confirmation rate is an end-to-end measurement under this run's committed client
+  pacing, endpoint, and cluster conditions, not a service level or isolated endpoint
+  capacity. The evidence gate reports it but does not assert a minimum.
 - The committed run confirmed all 200 planned actions, and that is not a claim about
   reliability. It is one bounded run at one pacing setting from one address. Earlier attempts
   at a higher request rate against the same endpoint had submissions rejected with HTTP 429
   and transactions that expired without inclusion, and were abandoned rather than committed.
-  When actions do not confirm, the evidence separates a cluster non-inclusion from an
-  endpoint-side rejection so the two are never conflated, because only the first says
-  anything about the cluster.
+  When actions do not confirm, the evidence separates explicit endpoint-side rejection from
+  signature absence through expiry. The latter does not prove where a send was lost.
 - Destination addresses are derived deterministically from the run identifier and have no
   private key, so the lamports delivered to them are unrecoverable. That is acceptable for
   valueless devnet SOL and would not be acceptable anywhere else.

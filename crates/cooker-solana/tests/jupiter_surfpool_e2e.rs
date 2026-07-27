@@ -1,5 +1,7 @@
 //! Real Jupiter execution acceptance through the pinned local Surfpool runtime.
 
+#![forbid(unsafe_code)]
+
 use std::{collections::BTreeSet, env, io, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 use chrono::Utc;

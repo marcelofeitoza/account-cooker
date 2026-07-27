@@ -1,4 +1,4 @@
-//! Bounded sustained soak against public Solana devnet.
+//! Bounded native-transfer run against public Solana devnet.
 //!
 //! This is the public-network counterpart to `surfpool_soak.rs`. It drives the same store,
 //! runtime engine, safety policy, and native-transfer adapter, but every transaction is signed
@@ -8,6 +8,7 @@
 //!
 //! The run is deliberately bounded. It is not a sustained-load proof and devnet is not mainnet.
 
+#![forbid(unsafe_code)]
 #![recursion_limit = "256"]
 
 use std::{
@@ -47,15 +48,15 @@ const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com";
 const TRANSFER_LAMPORTS: u64 = 1_000_000;
 const MAX_FEE_LAMPORTS: u64 = 10_000;
 const RESERVE_LAMPORTS: u64 = 100_000_000;
-const MODEL_VERSION: &str = "devnet-bounded-soak-v1";
+const MODEL_VERSION: &str = "devnet-bounded-run-v2";
 const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
 const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(90);
 /// Reconciliation passes allowed before the run is declared unsettled.
 const MAX_RECONCILIATION_ROUNDS: usize = 6;
 /// Pause between passes when a signature is still neither visible nor past its deadline.
 ///
-/// A blockhash is valid for 150 slots, roughly one minute, so a pause of this length
-/// guarantees the next pass can reach a verdict rather than asking the same question again.
+/// A 45-second pause normally advances the validity window substantially. The bounded loop
+/// permits multiple passes because public slot progression is external.
 const RECONCILIATION_BACKOFF: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Default)]
@@ -137,9 +138,9 @@ impl ChainGateway for ConfirmSubmissionGateway {
 #[ignore = "submits real transactions to public Solana devnet and spends real devnet SOL"]
 #[allow(
     clippy::too_many_lines,
-    reason = "the devnet soak keeps setup, execution, reconciliation, and evidence visible in one place"
+    reason = "the devnet run keeps setup, execution, reconciliation, and evidence visible in one place"
 )]
-async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
+async fn bounded_devnet_run_confirms_and_reconciles_without_duplicate_intents()
 -> Result<(), Box<dyn std::error::Error>> {
     let wall_started = Instant::now();
     let started_at = Utc::now();
@@ -147,7 +148,7 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
     let transaction_count = env_usize("COOKER_DEVNET_TRANSACTIONS", DEFAULT_TRANSACTION_COUNT)?;
     let max_concurrency = env_usize("COOKER_DEVNET_CONCURRENCY", DEFAULT_CONCURRENCY)?;
     if max_concurrency > 32 {
-        return Err(io::Error::other("devnet soak concurrency is limited to 32").into());
+        return Err(io::Error::other("devnet run concurrency is limited to 32").into());
     }
     let evidence_path = std::env::var_os("COOKER_DEVNET_EVIDENCE").map_or_else(
         || project_root.join("evidence/tmp/devnet-soak.json"),
@@ -161,7 +162,7 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             format!(
-                "devnet soak database already exists: {}",
+                "devnet run database already exists: {}",
                 database_path.display()
             ),
         )
@@ -248,8 +249,8 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
     }
     assert_eq!(idempotent_enqueue_rejections, transaction_count);
 
-    // A small barriered prefix carries the injected response loss. The remainder runs without
-    // the barrier so the measured throughput reflects the ordinary submission path.
+    // A small barriered prefix carries the injected response loss. Most actions run without
+    // that visibility barrier, but the reported end-to-end interval includes both batches.
     let first_batch_size = (transaction_count / 10).max(4).min(transaction_count);
     let loss = Arc::new(LoseOneSendResponse::default());
     let first_runtime = runtime(
@@ -262,7 +263,7 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
         true,
     )?;
     let first_claimed = store.claim_due_actions(
-        "devnet-before-restart",
+        "devnet-before-reconstruction",
         Utc::now(),
         Utc::now() + TimeDelta::minutes(60),
         first_batch_size,
@@ -280,7 +281,9 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
     assert!(first_summary.unknown >= 1, "{first_summary:?}");
     assert!(loss.triggered.load(Ordering::SeqCst));
 
-    // Discard every process-local component and rebuild it from the durable WAL file.
+    // Rebuild the runtime engine, store handle, and signer inside this process. The original
+    // SolanaGateway object and OS process remain alive. Durable action state is read from the
+    // same SQLite database, which remains configured in WAL mode.
     drop(first_runtime);
     drop(store);
     drop(signer);
@@ -301,7 +304,7 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
         false,
     )?;
     let second_claimed = store.claim_due_actions(
-        "devnet-after-restart",
+        "devnet-after-reconstruction",
         Utc::now(),
         Utc::now() + TimeDelta::minutes(60),
         transaction_count,
@@ -488,8 +491,8 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
                     "destination": destination,
                 }));
             }
-            // Signed, submitted, and never included before its blockhash expired. The signature
-            // is recorded so a reviewer can confirm the cluster has no record of it.
+            // Signed and persisted, with no signature observed through blockhash expiry. The
+            // record proves absence, not whether the endpoint or cluster received the send.
             ActionState::Expired => {
                 expired += 1;
                 *unconfirmed_causes.entry(cause).or_default() += 1;
@@ -581,8 +584,8 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
     };
 
     let evidence = json!({
-        "schema_version": 1,
-        "scenario": "bounded_devnet_native_transfer_soak",
+        "schema_version": 2,
+        "scenario": "bounded_devnet_native_transfer_run",
         "network": {
             "cluster": PublicCluster::Devnet.as_str(),
             "rpc": endpoint.for_evidence(),
@@ -618,14 +621,21 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
         "unresolved_unknown": unresolved_unknown,
         "response_loss_injections": 1,
         "submit_visibility_barriers": first_batch_size,
-        "ambiguous_outcomes_before_restart": first_summary.unknown,
-        "ambiguous_outcomes_after_restart": second_summary.unknown,
+        "ambiguous_outcomes_before_reconstruction": first_summary.unknown,
+        "ambiguous_outcomes_after_reconstruction": second_summary.unknown,
         "reconciled_without_resend": reconciled_confirmed + reconciled_failed + reconciled_expired,
         "reconciled_to_confirmed": reconciled_confirmed,
         "reconciled_to_failed": reconciled_failed,
         "reconciled_to_expired": reconciled_expired,
         "reconciliation_rounds": reconciliation_rounds,
-        "runtime_stack_restarts": 1,
+        "in_process_component_reconstructions": 1,
+        "component_reconstruction": {
+            "os_process_restarts": 0,
+            "runtime_engine_rebuilt": true,
+            "sqlite_database_reopened": true,
+            "signer_reloaded": true,
+            "gateway_reused": true,
+        },
         "journal_event_count": journal_events,
         "database_bytes": database_bytes,
         "exact_source_debit_count": exact_source_debits,
@@ -647,6 +657,7 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
             "payer_equation_met": payer_debit == expected_debit,
             "each_destination_delta_lamports": TRANSFER_LAMPORTS,
         },
+        "signature_order": "planned_sequence",
         "signatures": transactions,
     });
     write_json(&evidence_path, &evidence)?;
@@ -660,10 +671,9 @@ async fn bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents()
 
 /// Classify why an action never reached a confirmation, from its immutable event journal.
 ///
-/// The distinction that matters for a public-network result is whether the cluster declined to
-/// include a transaction it received, or whether the shared RPC endpoint rejected the request at
-/// its edge so the cluster never saw it at all. Those have completely different meanings and are
-/// reported separately rather than merged into one failure count.
+/// The distinction retained here is between explicit RPC-edge rejection and a persisted
+/// signature that remained absent through expiry. Absence does not prove where the send was
+/// lost, so the two outcomes are reported separately.
 fn classify_unconfirmed_cause(events: &[cooker_store::ActionEventRecord]) -> &'static str {
     let mut cause = "unclassified";
     for event in events {
@@ -715,7 +725,8 @@ fn planned_actions(
         .collect()
 }
 
-/// Destinations are derived from the run identifier so repeated runs never reuse an address.
+/// The run identifier namespaces destinations, and sequence makes each address unique within
+/// one run. Fresh UUID run identifiers make cross-run reuse negligibly unlikely.
 ///
 /// Every destination receives more than the rent-exempt minimum for a zero-length account, so
 /// the transfer creates a durable, independently readable account on the public cluster.

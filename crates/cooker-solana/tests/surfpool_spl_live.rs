@@ -1,5 +1,7 @@
 //! Classic SPL Token acceptance against the pinned local Surfpool runtime.
 
+#![forbid(unsafe_code)]
+
 use std::{
     fs, io,
     path::{Path, PathBuf},

@@ -41,7 +41,6 @@ if ((${#members[@]} != on_disk)); then
   fail "parsed ${#members[@]} workspace member(s) but found ${on_disk} crate manifest(s)"
 fi
 
-roots_checked=0
 for member in "${members[@]}"; do
   manifest="${member}/Cargo.toml"
   if [[ ! -f "${manifest}" ]]; then
@@ -53,18 +52,31 @@ for member in "${members[@]}"; do
     fail "${manifest} does not inherit the workspace lint table"
   fi
 
-  found_root=0
-  for root in "${member}/src/lib.rs" "${member}/src/main.rs"; do
-    [[ -f "${root}" ]] || continue
-    found_root=1
-    roots_checked=$((roots_checked + 1))
-    if ! grep -qxF '#![forbid(unsafe_code)]' "${root}"; then
-      fail "${root} is missing an explicit #![forbid(unsafe_code)]"
-    fi
-  done
+done
 
-  if ((found_root == 0)); then
-    fail "workspace member has no src/lib.rs or src/main.rs: ${member}"
+metadata="$(cargo metadata --locked --no-deps --format-version 1)"
+crate_roots=()
+while IFS= read -r root; do
+  crate_roots+=("${root}")
+done < <(printf '%s\n' "${metadata}" | jq -r '.packages[].targets[].src_path' | LC_ALL=C sort -u)
+
+if ((${#crate_roots[@]} == 0)); then
+  fail 'cargo metadata reported no Rust crate roots'
+fi
+
+roots_checked=0
+for root in "${crate_roots[@]}"; do
+  display_root="${root#"${PROJECT_ROOT}/"}"
+  case "${root}" in
+    "${PROJECT_ROOT}/"*) ;;
+    *)
+      fail "cargo metadata reported a crate root outside the workspace: ${root}"
+      continue
+      ;;
+  esac
+  roots_checked=$((roots_checked + 1))
+  if ! grep -qxF '#![forbid(unsafe_code)]' "${root}"; then
+    fail "${display_root} is missing an explicit #![forbid(unsafe_code)]"
   fi
 done
 

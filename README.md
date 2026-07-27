@@ -7,14 +7,13 @@ must survive faults without duplicate execution, and the evaluator must report f
 privacy hypotheses as plainly as successful ones.
 
 > Status: implementation, canonical evidence, two independent clean-clone release
-> verifications, published-policy eligibility audit, and draft-PR handoff are complete.
-> The upstream pull request remains a draft until Marcelo performs the final human review
-> and decides whether to submit it.
+> verifications, published-policy eligibility audit, and PR handoff are complete.
+> Upstream PR 2 is open and ready for review.
 
 ## What Ships
 
 - Deterministic persona and semi-Markov session planning with one bounded priority
-  scheduler for fleets of thousands of agents.
+  scheduler; canonical evidence covers a 1,000-agent fleet.
 - SQLite WAL persistence with migrations, atomic leases, deterministic action IDs,
   immutable journals, persisted signed transactions, historical confirmation audits, and
   unknown-outcome reconciliation.
@@ -32,9 +31,8 @@ privacy hypotheses as plainly as successful ones.
   signals across five fixed seeds and feature ablations.
 - Deterministic virtual and real Surfpool soak harnesses plus a sanitized,
   checksum-bearing evidence pack.
-- One opt-in bounded public devnet soak with committed, explorer-checkable transaction
-  signatures, and a written statement of which loopback measurements survive the move to a
-  public network and which do not.
+- One opt-in bounded public devnet run with committed, explorer-checkable transaction
+  signatures, and a written statement of what that run establishes and leaves unmeasured.
 
 ## Claim Boundary
 
@@ -48,11 +46,12 @@ or airdrop farming, NFT manipulation, dust spam, bridge churn, or deceptive mult
 funding.
 
 Chain execution is loopback Surfpool by default and by configuration. There is exactly one
-public-network path, an opt-in bounded devnet soak that must be started by hand and that
-names its cluster in Rust source; no configuration file, environment variable, or CLI flag
-can send a transaction off loopback, and the canonical `scripts/full-demo.sh` run never
-does. Every transaction in the canonical evidence pack is loopback. The separate devnet
-record and the honest comparison between the two are in
+public-network path, an opt-in bounded devnet test that must be started by hand and that
+names its cluster in Rust source. Application configuration and CLI flags cannot select a
+public cluster. The dedicated ignored harness accepts an endpoint URL override, but hardcodes
+devnet and verifies its pinned genesis hash before loading a signer. The canonical
+`scripts/full-demo.sh` run never sends off loopback. Every transaction in the canonical
+evidence pack is loopback. The separate devnet record and comparison are in
 [the devnet run and topology delta](docs/DEVNET.md). There is no mainnet execution path.
 
 The current topology is one local controller, one SQLite store, local signer files, and one
@@ -72,8 +71,8 @@ The pinned environment is:
 - `bash`, `curl`, `gzip`, `jq`, `lsof`, and `shellcheck`;
 - `cargo-audit 0.22.1`, `cargo-deny 0.20.2`, and Gitleaks `8.30.1` for the complete gate.
 
-Two safety postures are declared where a reviewer can see them in one file. Every crate
-root carries an explicit `#![forbid(unsafe_code)]` on top of the workspace-wide
+Two safety postures are declared where a reviewer can see them in one file. All 20 Cargo
+target roots carry an explicit `#![forbid(unsafe_code)]` on top of the workspace-wide
 `unsafe_code = "forbid"` lint, and the RustSec advisory policy is checked in at
 [`.cargo/audit.toml`](.cargo/audit.toml), which denies unmaintained, unsound, and yanked
 dependencies and records a reason for each accepted exception. `cargo audit` reads that
@@ -82,7 +81,8 @@ Both run in CI. See [validation and evidence gates](docs/VALIDATION.md).
 
 The harness starts Surfpool offline from that pinned snapshot with instruction profiling
 disabled. Remote account misses and profiling are not part of the acceptance claim and
-would otherwise add external rate limits or unrelated resource work to sustained execution.
+would otherwise add external rate limits or unrelated resource work to canonical soak
+execution.
 
 Run the reduced rehearsal while developing:
 
@@ -104,7 +104,8 @@ the six-checkpoint process-crash matrix, and native stake. Stake runs last becau
 advances Surfpool across epochs. The demo uses fresh, isolated, offline Surfpool state; no
 chain RPC request leaves loopback and no transaction is written to a public RPC.
 
-The public devnet soak is deliberately not part of that command. It spends real devnet SOL,
+The public devnet native-transfer run is deliberately not part of that command. It spends
+real devnet SOL,
 so it is opt-in, run by hand, and recorded separately:
 
 ```bash
@@ -112,7 +113,7 @@ so it is opt-in, run by hand, and recorded separately:
 ```
 
 Read [the devnet run and topology delta](docs/DEVNET.md) before citing either result. It
-states which loopback numbers carry over to a public network and which do not.
+states what the public run establishes and what remains unmeasured.
 
 ## CLI
 
@@ -142,7 +143,7 @@ was loaded and whether state changed, making the safety boundary machine-verifia
 |---|---|
 | `cooker-core` | domain types, personas, deterministic behavior, scheduler, safety policy |
 | `cooker-store` | SQLite migrations, leases, journals, budgets, audits, reconciliation |
-| `cooker-solana` | Surfpool RPC, local signers, transaction lifecycle, four adapters |
+| `cooker-solana` | verified Surfpool or declared-devnet RPC, local signers, transaction lifecycle, four adapters |
 | `cooker-runtime` | bounded fleet workers, recovery, confirmation auditing, shutdown |
 | `cooker-eval` | label-free features, transparent attacks, metrics, ablations, reports |
 | `cooker-cli` | configuration, operator commands, virtual soak, evidence-facing output |
@@ -153,9 +154,10 @@ service, data, fixture, key, or runtime dependency on any private project.
 
 ## Evidence
 
-Raw databases, keys, full signatures, and logs stay under ignored directories. The
-evidence builder validates them and exports only redacted structured results, exact tool
-and snapshot hashes, supported metrics, commands, and checksums. See
+Raw databases, keys, local Surfpool signatures, and logs stay under ignored directories. The
+evidence builder validates them and exports only redacted structured results, exact tool and
+snapshot hashes, supported metrics, commands, and checksums. The separate devnet record
+intentionally commits public signatures so third parties can check them. See
 [the evidence guide](evidence/README.md) and [validation contract](docs/VALIDATION.md).
 
 ## Design Documents

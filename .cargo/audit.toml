@@ -10,10 +10,12 @@
 
 [advisories]
 ignore = [
-  # bincode 1.3.3 reaches the workspace only through Solana interface crates.
-  # The advisory is informational (unmaintained). It names no vulnerability and
-  # has no patched release, so there is nothing to upgrade to. Revisit when the
-  # Solana interface crates move off bincode 1.x.
+  # cooker-solana uses bincode 1.3.3 directly for Solana transaction wire bytes
+  # and native stake-state decoding; pinned Solana crates also use it transitively.
+  # RUSTSEC-2025-0141 is an unmaintained notice, not a reported vulnerability, and
+  # lists no patched or unaffected release. Keep this compatibility exception while
+  # these encodings and dependencies remain, then revisit the direct codec calls and
+  # Solana dependency graph together.
   "RUSTSEC-2025-0141",
 ]
 informational_warnings = ["unmaintained", "unsound", "notice"]

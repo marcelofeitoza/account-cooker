@@ -11,7 +11,8 @@ Status: the canonical `evidence/final` pack and both fresh-clone repetitions pas
 It is produced by the opt-in `scripts/devnet-soak.sh` and is never part of the canonical
 pack, because the canonical pack is defined to contain no public-network transaction. The
 two records are kept side by side deliberately; see
-[the devnet run and topology delta](../docs/DEVNET.md) for what transfers between them.
+[the devnet run and topology delta](../docs/DEVNET.md) for what the public run establishes
+and leaves unmeasured.
 
 ## Generate
 
@@ -65,9 +66,9 @@ and `evidence/raw` directories and are not needed to reproduce the proof.
 
 `evidence/devnet` deliberately commits full transaction signatures. A local Surfpool
 signature means nothing outside the surfnet that produced it, so shortening it costs a
-reviewer nothing. A devnet signature is public record and is the only thing that lets
-someone else check the run, so redacting it would remove the evidence. No key, no signed
-transaction bytes, and no database leave the ignored directories in either case.
+reviewer nothing. A devnet signature is public record and is the direct identifier needed
+to query and verify each recorded transaction. No key, no signed transaction bytes, and no
+database leave the ignored directories in either case.
 
 ## Interpretation
 
@@ -85,5 +86,5 @@ particular:
 - the stateful adapter is native Solana stake, not Marinade.
 
 The separate `docs/ELIGIBILITY.md` audit covers the human submission path and disclosed
-AI assistance. Personal eligibility attestations and the manual submission remain outside
-this evidence pack and under Marcelo's control.
+AI assistance. Personal eligibility attestations, the completed manual submission, and any
+KYC or payout requirements remain outside this evidence pack and under Marcelo's control.

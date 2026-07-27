@@ -1,5 +1,6 @@
 //! Durable compressed soak against real local Surfpool transactions.
 
+#![forbid(unsafe_code)]
 #![recursion_limit = "256"]
 
 use std::{
@@ -281,7 +282,8 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     );
     assert!(loss.triggered.load(Ordering::SeqCst));
 
-    // Deliberately discard every process-local component and reconstruct it from the WAL file.
+    // Discard the runtime, store, signer, and gateway handles, then reconstruct them inside the
+    // same test process from the persistent SQLite database and local signer file.
     drop(first_runtime);
     drop(store);
     drop(signer);

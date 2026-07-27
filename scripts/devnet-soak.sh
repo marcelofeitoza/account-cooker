@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Bounded sustained soak against public Solana devnet.
+# Bounded native-transfer run against public Solana devnet.
 #
 # This is the public-network counterpart to scripts/surfpool-soak.sh. It writes real
 # transactions to a real cluster and spends real devnet SOL. It is deliberately opt-in and
@@ -28,9 +28,8 @@ MAX_FEE_LAMPORTS=10000
 RESERVE_LAMPORTS=100000000
 
 transactions=200
-# Worker concurrency is not the throughput bound. The gateway paces itself under the public
-# endpoint's published request, per-method, and connection ceilings, so extra workers only
-# overlap confirmation waits.
+# The default allows bounded overlap while the public gateway applies its configured pacing.
+# Reported throughput remains an end-to-end observation; this run does not isolate a bottleneck.
 concurrency=8
 signer_path="${PROJECT_ROOT}/.devnet/keys/payer.json"
 output_dir="${PROJECT_ROOT}/evidence/raw/devnet-soak/$(date -u '+%Y%m%dT%H%M%SZ')-$$"
@@ -125,7 +124,7 @@ required=$((transactions * (TRANSFER_LAMPORTS + MAX_FEE_LAMPORTS) + RESERVE_LAMP
 ((balance >= required)) ||
   die "payer ${payer} holds ${balance} lamports, run needs ${required}; fund it with a system transfer"
 
-note "Devnet soak"
+note "Bounded devnet native-transfer run"
 note "  endpoint:     ${RPC_URL}"
 note "  genesis:      ${genesis_hash}"
 note "  payer:        ${payer}"
@@ -143,13 +142,14 @@ COOKER_DEVNET_RPC_URL="${RPC_URL}" \
 COOKER_DEVNET_DATABASE="${output_dir}/cooker.sqlite" \
 COOKER_DEVNET_EVIDENCE="${output_dir}/devnet-soak.json" \
   cargo test --locked -p cooker-solana --test devnet_soak \
-    bounded_devnet_soak_confirms_and_reconciles_without_duplicate_intents \
+    bounded_devnet_run_confirms_and_reconciles_without_duplicate_intents \
     -- --ignored --exact --nocapture 2>&1 | tee "${output_dir}/test.log"
 
 # Gate the engine invariants that must hold on any network. Confirmation rate is measured and
 # reported, never asserted, because inclusion is the cluster's decision and not the engine's.
 jq -e --argjson expected "${transactions}" '
-  .schema_version == 1
+  .schema_version == 2
+  and .scenario == "bounded_devnet_native_transfer_run"
   and .network.cluster == "solana-devnet"
   and .network.genesis_hash == "'"${DEVNET_GENESIS_HASH}"'"
   and .transaction_count == $expected
@@ -162,20 +162,27 @@ jq -e --argjson expected "${transactions}" '
   and .unresolved_unknown == 0
   and .response_loss_injections == 1
   and .reconciled_to_confirmed >= 1
-  and .runtime_stack_restarts == 1
+  and .in_process_component_reconstructions == 1
+  and .component_reconstruction.os_process_restarts == 0
+  and .component_reconstruction.runtime_engine_rebuilt == true
+  and .component_reconstruction.sqlite_database_reopened == true
+  and .component_reconstruction.signer_reloaded == true
+  and .component_reconstruction.gateway_reused == true
   and .exact_source_debit_count == .confirmed_action_count
   and .exact_destination_credit_count == .confirmed_action_count
   and .state_delta.payer_equation_met == true
   and .peak_worker_count <= .max_concurrency
+  and .signature_order == "planned_sequence"
   and (.signatures | length) == $expected
+  and ([.signatures[].sequence] == [range(0; $expected)])
   and ([.unconfirmed_causes[]] | add // 0) == .unconfirmed_action_count
   and (.unconfirmed_causes | has("unclassified") | not)
-' "${output_dir}/devnet-soak.json" >/dev/null || die "devnet soak evidence gate failed"
+' "${output_dir}/devnet-soak.json" >/dev/null || die "devnet run evidence gate failed"
 
 confirmed="$(jq -r '.confirmed_action_count' "${output_dir}/devnet-soak.json")"
 unconfirmed="$(jq -r '.unconfirmed_action_count' "${output_dir}/devnet-soak.json")"
 rate="$(jq -r '.confirmed_per_second' "${output_dir}/devnet-soak.json")"
-note "Devnet soak: passed (${confirmed} confirmed, ${unconfirmed} unconfirmed, ${rate} confirmed/s)"
+note "Devnet run: passed (${confirmed} confirmed, ${unconfirmed} unconfirmed, ${rate} confirmed/s)"
 note "Evidence: ${output_dir}/devnet-soak.json"
 
 if ((promote)); then

@@ -1,11 +1,18 @@
 {
   "absolute_slot_after": 479324740,
   "absolute_slot_before": 479323050,
-  "ambiguous_outcomes_after_restart": 0,
-  "ambiguous_outcomes_before_restart": 1,
+  "ambiguous_outcomes_after_reconstruction": 0,
+  "ambiguous_outcomes_before_reconstruction": 1,
   "budget_violations": 0,
   "confirmed_action_count": 200,
   "confirmed_per_second": 0.323,
+  "component_reconstruction": {
+    "gateway_reused": true,
+    "os_process_restarts": 0,
+    "runtime_engine_rebuilt": true,
+    "signer_reloaded": true,
+    "sqlite_database_reopened": true
+  },
   "database_bytes": 2764800,
   "distinct_confirmed_slots": 200,
   "duplicate_enqueue_attempts": 200,
@@ -13,6 +20,14 @@
   "duplicate_signatures": 0,
   "epoch_after": 1109,
   "epoch_before": 1109,
+  "evidence_revision": {
+    "corrected_at": "2026-07-27T23:10:17Z",
+    "measurements_changed": false,
+    "original_schema_version": 1,
+    "original_sha256": "3c453de2fdfaf8c4099d49e71fe3e4698f74fd850916e164a7d8d25b7c4625ce",
+    "reason": "Post-run truth correction: relabeled the in-process component reconstruction and declared planned-sequence record ordering.",
+    "transaction_records_changed": false
+  },
   "exact_destination_credit_count": 200,
   "exact_source_debit_count": 200,
   "expired_action_count": 0,
@@ -20,6 +35,7 @@
   "finished_at": "2026-07-27T18:30:23.769173+00:00",
   "first_confirmed_slot": 479323073,
   "idempotent_duplicate_enqueue_rejections": 200,
+  "in_process_component_reconstructions": 1,
   "journal_event_count": 2003,
   "last_confirmed_slot": 479324703,
   "logical_action_count": 200,
@@ -43,9 +59,9 @@
   "reconciliation_rounds": 1,
   "rejected_action_count": 0,
   "response_loss_injections": 1,
-  "runtime_stack_restarts": 1,
-  "scenario": "bounded_devnet_native_transfer_soak",
-  "schema_version": 1,
+  "scenario": "bounded_devnet_native_transfer_run",
+  "schema_version": 2,
+  "signature_order": "planned_sequence",
   "signatures": [
     {
       "destination": "7h9v8JMJHKHw4X3R62YSCJjAf64XYs1FarjyGCtsjQ5D",

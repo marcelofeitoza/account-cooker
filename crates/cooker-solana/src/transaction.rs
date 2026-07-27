@@ -84,7 +84,7 @@ pub fn build_signed_transaction_with_signers(
     })?;
     if bytes.len() > MAX_WIRE_TRANSACTION_BYTES {
         return Err(CookerError::Codec(format!(
-            "transaction is {} bytes; Surfpool accepts at most {MAX_WIRE_TRANSACTION_BYTES}",
+            "transaction is {} bytes; Solana accepts at most {MAX_WIRE_TRANSACTION_BYTES}",
             bytes.len()
         )));
     }
@@ -97,7 +97,7 @@ pub fn build_signed_transaction_with_signers(
     })
 }
 
-/// Build, sign, verify, and serialize a v0 transaction using lookup tables read from Surfpool.
+/// Build, sign, verify, and serialize a v0 transaction using lookup tables read from the gateway.
 ///
 /// The payer is the only permitted signer. Callers must validate every instruction and lookup
 /// table before invoking this function; this boundary only compiles and signs those inputs.
@@ -146,7 +146,7 @@ pub fn build_signed_v0_transaction(
     })?;
     if bytes.len() > MAX_WIRE_TRANSACTION_BYTES {
         return Err(CookerError::Codec(format!(
-            "v0 transaction is {} bytes; Surfpool accepts at most {MAX_WIRE_TRANSACTION_BYTES}",
+            "v0 transaction is {} bytes; Solana accepts at most {MAX_WIRE_TRANSACTION_BYTES}",
             bytes.len()
         )));
     }

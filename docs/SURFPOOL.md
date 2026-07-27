@@ -1,12 +1,14 @@
 # Surfpool Development Contract
 
 Status: implemented. The expanded six-group acceptance matrix and canonical full-demo are
-release gates; no canonical evidence pack is claimed yet.
+release gates, and the checksum-bearing canonical evidence pack is committed.
 
-Surfpool is mandatory for every chain-facing development, integration, recovery, and soak
-workflow in Account Cooker. Application transactions are locally signed and submitted to
-loopback Surfpool only. The harness uses the mainnet feature baseline in offline mode and
-loads every non-native account it needs from the pinned reviewed snapshot.
+Surfpool is mandatory for canonical chain development, integration, recovery, and soak
+workflows in Account Cooker. Those application transactions are locally signed and submitted
+to loopback Surfpool. The sole exception is the separate ignored, source-declared public
+devnet native-transfer run documented in `DEVNET.md`; it is excluded from canonical evidence
+and CI. The Surfpool harness uses the mainnet feature baseline in offline mode and loads every
+non-native account it needs from the pinned reviewed snapshot.
 
 ## 1. Pinned Environment
 
@@ -63,8 +65,10 @@ bound to its configured Surfnet identity; a mismatched store or fleet manifest i
 The one path that addresses a public cluster, `RpcEndpoint::public_cluster` plus
 `SolanaGateway::connect_public_cluster`, requires a `PublicCluster` value written in Rust
 source and proves that cluster's pinned genesis hash before returning. No configuration
-file, environment variable, or CLI flag can reach it, and `scripts/full-demo.sh` never runs
-it. See [the devnet run and topology delta](DEVNET.md).
+file or CLI flag can select it. The dedicated ignored test accepts an endpoint URL through
+`COOKER_DEVNET_RPC_URL`, but binds it to devnet in source and verifies the pinned devnet
+genesis hash before loading a signer. `scripts/full-demo.sh` never runs it. See
+[the devnet run and topology delta](DEVNET.md).
 
 The following fail before transaction construction:
 

@@ -1,8 +1,7 @@
 # Architecture
 
 Status: implemented architecture; canonical release evidence and two independent
-clean-clone verifications are complete. The pull request remains draft for Marcelo's
-human review and submission decision.
+clean-clone verifications are complete. PR 2 is open and ready for review.
 
 This repository is a standalone clean-room implementation. It has no source, fixture,
 service, key, data, or runtime dependency on any private project; anything conceptually
@@ -25,7 +24,7 @@ execution, and privacy evaluation:
                                          action adapter
                                                   |
                                                   v
-                                        Surfpool gateway
+                                      verified Solana gateway
                                                   |
                                                   v
                                          receipt observer
@@ -36,7 +35,8 @@ execution, and privacy evaluation:
                        durable event log                         evaluator trace
 
 The same planner runs against a VirtualClock and a simulated adapter for fast,
-deterministic fleet generation. Chain-facing behavior always uses Surfpool.
+deterministic fleet generation. Canonical chain acceptance uses Surfpool. One separate,
+ignored, source-declared test uses the native-transfer path against verified public devnet.
 
 ## 2. Architectural Properties
 
@@ -344,10 +344,12 @@ A second constructor, `SolanaGateway::connect_public_cluster`, addresses a named
 Solana cluster and is the only path that leaves loopback. It requires an `RpcEndpoint` built
 from a `PublicCluster` value written in Rust source, and it proves that cluster's pinned
 genesis hash before returning, so a signer is still never loaded against an unverified
-network. Configuration cannot reach it: `RpcEndpoint`'s `FromStr` and `TryFrom<Url>`
-implementations, which are the only paths a parsed config or environment variable can use,
-still accept explicit loopback IPs exclusively, and the `cooker` CLI never constructs a
-public endpoint. It is used by the bounded devnet soak documented in
+network. Application configuration cannot select it: `RpcEndpoint`'s `FromStr` and
+`TryFrom<Url>` implementations still accept explicit loopback IPs exclusively, and the
+`cooker` CLI never constructs a public endpoint. The dedicated ignored test accepts an
+endpoint URL through `COOKER_DEVNET_RPC_URL`, binds it to `PublicCluster::Devnet` in source,
+and verifies the pinned devnet genesis hash before loading a signer. It is used by the
+bounded devnet native-transfer run documented in
 [the devnet run and topology delta](DEVNET.md).
 
 Against a public cluster the same gateway also paces itself under the endpoint's published

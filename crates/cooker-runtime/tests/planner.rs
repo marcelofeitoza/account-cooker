@@ -1,5 +1,7 @@
 //! Durable controller cursor and crash-replay proofs.
 
+#![forbid(unsafe_code)]
+
 use std::{collections::BTreeMap, error::Error, sync::Arc};
 
 use chrono::{TimeZone, Utc};

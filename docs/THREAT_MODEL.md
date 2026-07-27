@@ -46,10 +46,10 @@ May observe RPC timing, client network metadata, or pre-inclusion flow. The eval
 or defend network-layer correlation.
 
 On loopback this adversary is hypothetical, because nothing sits between the controller and
-the chain. The bounded devnet run makes it concrete: one shared RPC provider saw every
-request from one source address, in order, with timing, before inclusion. A fleet driven
-that way is linkable at the RPC layer regardless of its on-chain behavior. That gap is real
-and undefended; see [the devnet run and topology delta](DEVNET.md).
+the chain. The bounded devnet run sent every request through one shared RPC provider from one
+source address. That provider could observe request arrival timing and client network
+metadata before inclusion. Account Cooker does not defend that correlation channel; see
+[the devnet run and topology delta](DEVNET.md).
 
 ### Statistical clusterer
 
@@ -171,7 +171,8 @@ Controls:
   no mainnet path at all.
 
 The single public-cluster path is `RpcEndpoint::public_cluster` plus
-`SolanaGateway::connect_public_cluster`, used by the opt-in bounded devnet soak. It requires
+`SolanaGateway::connect_public_cluster`, used by the opt-in bounded devnet native-transfer
+run. It requires
 a `PublicCluster` value written in Rust source, the only such value is devnet, and the
 gateway proves devnet's pinned genesis hash before a signer is loaded. See
 [the devnet run and topology delta](DEVNET.md).
