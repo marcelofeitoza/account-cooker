@@ -7,7 +7,7 @@ use cooker_core::{
     ActionKind, AgentSnapshot, RunId, SessionState, TraceEvent, run_virtual_simulation,
 };
 use cooker_eval::{render_csv, render_markdown, run_experiment};
-use cooker_solana::{FleetManifest, LocalKeypair, SurfpoolGateway, SurfpoolRpcUrl};
+use cooker_solana::{FleetManifest, LocalKeypair, RpcEndpoint, SolanaGateway};
 use cooker_store::{RunRegistration, Store, StoreIdentity, StoreStatusSnapshot};
 use serde::Serialize;
 
@@ -375,7 +375,7 @@ fn validate(path: &std::path::Path, output: &mut impl Write) -> Result<()> {
 
 fn doctor(path: &std::path::Path, output: &mut impl Write) -> Result<()> {
     let config = load_validated(path)?;
-    let endpoint = SurfpoolRpcUrl::new(config.core.network.rpc_url.clone())
+    let endpoint = RpcEndpoint::new(config.core.network.rpc_url.clone())
         .map_err(anyhow::Error::msg)
         .context("RPC endpoint is not a strict explicit-loopback Surfpool URL")?;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -383,7 +383,7 @@ fn doctor(path: &std::path::Path, output: &mut impl Write) -> Result<()> {
         .build()
         .context("failed to create doctor async runtime")?;
     let report = runtime.block_on(async {
-        let gateway = SurfpoolGateway::connect(endpoint)
+        let gateway = SolanaGateway::connect(endpoint)
             .await
             .map_err(anyhow::Error::msg)
             .context("Surfpool identity connection failed")?;

@@ -28,7 +28,9 @@ It also protects operational integrity:
 - no duplicate logical spend after restart;
 - budgets and reserves remain enforced;
 - generated keys do not leak;
-- chain configuration cannot redirect execution to a public network;
+- chain configuration cannot redirect execution to a public network, and the one
+  public-cluster path is declared in source, opt-in, devnet-pinned by genesis hash, and
+  excluded from the canonical run;
 - evidence cannot be confused with organic-user traffic.
 
 ## 3. Adversaries
@@ -42,6 +44,12 @@ and historical graph relationships.
 
 May observe RPC timing, client network metadata, or pre-inclusion flow. The evaluator does not model
 or defend network-layer correlation.
+
+On loopback this adversary is hypothetical, because nothing sits between the controller and
+the chain. The bounded devnet run makes it concrete: one shared RPC provider saw every
+request from one source address, in order, with timing, before inclusion. A fleet driven
+that way is linkable at the RPC layer regardless of its on-chain behavior. That gap is real
+and undefended; see [the devnet run and topology delta](DEVNET.md).
 
 ### Statistical clusterer
 
@@ -151,7 +159,7 @@ The implementation excludes:
 
 Controls:
 
-- Surfpool-only endpoint validation;
+- loopback-only endpoint validation on every configuration-reachable path;
 - dry-run default;
 - explicit execution acknowledgement;
 - protocol, program, mint, signer, and destination allowlists;
@@ -159,7 +167,14 @@ Controls:
 - cooldowns and minimum reserves;
 - kill switch and graceful shutdown;
 - generated-traffic attribution in local records;
-- no public-network execution path through the validated gateway.
+- no public-network execution path through the CLI, configuration, or canonical run, and
+  no mainnet path at all.
+
+The single public-cluster path is `RpcEndpoint::public_cluster` plus
+`SolanaGateway::connect_public_cluster`, used by the opt-in bounded devnet soak. It requires
+a `PublicCluster` value written in Rust source, the only such value is devnet, and the
+gateway proves devnet's pinned genesis hash before a signer is loaded. See
+[the devnet run and topology delta](DEVNET.md).
 
 ## 10. Operational Threats
 
@@ -181,7 +196,8 @@ absent. Unknown transactions are never rebuilt automatically.
 ### RPC redirection
 
 Mitigation: typed loopback URL plus Surfpool-specific identity probes before signer/store
-runtime activation.
+runtime activation. The devnet path substitutes an equally strong probe, a pinned genesis
+hash, and is unreachable from configuration.
 
 ### Key leakage
 
@@ -237,7 +253,10 @@ Additional fixed limitations are:
 - deterministic Jupiter proof uses a route-specific offline snapshot captured from a lazy
   fork at slot `433717382`, not current market state;
 - coordination is one local controller, local signer files, SQLite, and loopback Surfpool,
-  not a distributed or public-network topology;
+  not a distributed topology; one bounded devnet run adds a public-network data point but is
+  not a sustained-load result, and devnet is not mainnet;
+- the evaluator has never been run on public-network traces, so its privacy metrics are not
+  established against real inclusion delay, slot granularity, or transaction loss;
 - the stateful protocol path is native Solana stake, not Marinade.
 
 The contribution is a workload and measurement tool, not a guarantee of privacy.

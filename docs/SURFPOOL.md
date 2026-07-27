@@ -51,21 +51,28 @@ process command is the pinned Surfpool binary. It never uses a broad process-kil
 
 ## 3. Fail-Closed Application Guard
 
-`SurfpoolRpcUrl` accepts only HTTP(S) URLs whose host resolves syntactically to IPv4 or
-IPv6 loopback. `SurfpoolGateway::connect` then requires Surfpool `1.4.0` and a valid
-Surfnet-info response.
+Every configuration-reachable path builds an `RpcEndpoint` through `FromStr` or
+`TryFrom<Url>`, which accept only plain-HTTP URLs whose host is an explicit IPv4 or IPv6
+loopback address with a port. `SolanaGateway::connect` then requires Surfpool `1.4.0` and a
+valid Surfnet-info response.
 
 Online CLI commands perform this preflight before loading a signer. Preview, `status`, and
 configuration validation perform no network request and load no signer. Runtime state is
 bound to its configured Surfnet identity; a mismatched store or fleet manifest is rejected.
 
+The one path that addresses a public cluster, `RpcEndpoint::public_cluster` plus
+`SolanaGateway::connect_public_cluster`, requires a `PublicCluster` value written in Rust
+source and proves that cluster's pinned genesis hash before returning. No configuration
+file, environment variable, or CLI flag can reach it, and `scripts/full-demo.sh` never runs
+it. See [the devnet run and topology delta](DEVNET.md).
+
 The following fail before transaction construction:
 
-- mainnet, devnet, testnet, or any other non-loopback RPC URL;
+- mainnet, devnet, testnet, or any other non-loopback RPC URL supplied as configuration;
 - a local validator that does not expose Surfpool identity RPCs;
 - a Surfpool version other than `1.4.0`;
 - a durable store or fleet manifest bound to another Surfnet;
-- a signer outside the project root's `.surfpool/keys` directory.
+- a signer outside the project root's `.surfpool/keys` or `.devnet/keys` directories.
 
 ## 4. Reviewed Jupiter State
 
@@ -188,11 +195,15 @@ reconciliation without resend.
 
 - Full-demo runs allocate unique database, PID, key, session, runtime-env, and log paths.
 - A caller may override ports and paths, but all generated keys must stay below the
-  project's ignored `.surfpool/keys` boundary.
-- Keys, signed bytes, full signatures, mutable SQLite files, raw logs, and decompressed
-  snapshots are never committed.
-- Evidence contains shortened local signatures, public state deltas, version/hash
-  provenance, and explicit `public_chain_rpc_reads: 0` and `public_network_writes: 0`.
+  project's ignored `.surfpool/keys` boundary, or `.devnet/keys` for the separate devnet
+  payer.
+- Keys, signed bytes, mutable SQLite files, raw logs, and decompressed snapshots are never
+  committed. Full signatures are never committed for loopback runs, where they mean nothing
+  outside the surfnet that produced them; the separate devnet record commits them in full
+  because they are public record and are the evidence.
+- Evidence for this Surfpool harness contains shortened local signatures, public state
+  deltas, version/hash provenance, and explicit `public_chain_rpc_reads: 0` and
+  `public_network_writes: 0`.
 - Raw and sanitized outputs must remain below `evidence/raw` and `evidence`, respectively;
   traversal paths and overwrite attempts are rejected.
 

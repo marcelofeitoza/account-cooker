@@ -1,13 +1,19 @@
-//! Async JSON-RPC transport and verified Surfpool gateway.
+//! Async JSON-RPC transport and identity-verified chain gateway.
 
 use std::{
+    collections::BTreeMap,
     fmt,
     str::FromStr,
     sync::{
-        Arc,
+        Arc, Mutex as StdMutex,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
+};
+
+use tokio::{
+    sync::{Mutex as TokioMutex, OwnedSemaphorePermit, Semaphore},
+    time::{Instant, sleep},
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
@@ -23,10 +29,44 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
 
-use crate::{RpcError, SurfpoolRpcUrl};
+use crate::{PublicCluster, RpcEndpoint, RpcError, RpcFailureClass};
 
 const MAX_RPC_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+/// Request timeout for a loopback endpoint that is never contended by other traffic.
+const LOOPBACK_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// Request timeout for a shared public endpoint behind the open internet.
+const PUBLIC_CLUSTER_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+/// Minimum spacing between any two requests to a shared public endpoint.
+///
+/// Solana's public devnet endpoint reports its budgets in `x-ratelimit-*` response headers, and
+/// they are per source address rather than per process. Measured runs were rejected at rates
+/// well inside the reported ceilings, because the address budget is shared with everything else
+/// behind the same address. The safe target is therefore a small fraction of the ceiling.
+const PUBLIC_CLUSTER_MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(320);
+/// Minimum spacing between two requests for the same RPC method.
+///
+/// The endpoint tracks a separate, lower budget per RPC method, so status polling cannot be
+/// allowed to consume the whole address budget on its own.
+const PUBLIC_CLUSTER_MIN_METHOD_INTERVAL: Duration = Duration::from_millis(700);
+/// Maximum requests in flight against a shared public endpoint.
+///
+/// The published connection ceiling is 40 new connections per 10 seconds per source address,
+/// and it is separate from the request ceiling. A measured run against devnet tripped it while
+/// staying well under the request ceiling, because HTTP/1.1 needs one connection per concurrent
+/// request. HTTP/2 is negotiated over TLS so a public endpoint multiplexes onto one connection;
+/// this bound plus a warm idle pool keeps the count low even if the endpoint declines HTTP/2.
+/// A loopback endpoint is plain HTTP with no prior-knowledge upgrade, so it stays HTTP/1.1 and
+/// is unaffected by any of this.
+const PUBLIC_CLUSTER_MAX_IN_FLIGHT: usize = 3;
+/// Idle connections retained per host so a paced request finds a warm connection.
+const PUBLIC_CLUSTER_POOL_IDLE_CONNECTIONS: usize = 4;
+const PUBLIC_CLUSTER_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+/// Bounded retries for transient read failures against a shared public endpoint.
+const PUBLIC_CLUSTER_READ_RETRIES: u32 = 6;
+const PUBLIC_CLUSTER_RETRY_BACKOFF: Duration = Duration::from_millis(500);
+const PUBLIC_CLUSTER_RETRY_BACKOFF_MAX: Duration = Duration::from_secs(8);
 const GET_VERSION: &str = "getVersion";
+const GET_GENESIS_HASH: &str = "getGenesisHash";
 const GET_SURFNET_INFO: &str = "surfnet_getSurfnetInfo";
 const GET_LATEST_BLOCKHASH: &str = "getLatestBlockhash";
 const GET_BLOCK_HEIGHT: &str = "getBlockHeight";
@@ -55,6 +95,28 @@ pub struct SurfpoolIdentity {
     pub solana_core: Option<String>,
     /// Active feature-set identifier when reported.
     pub feature_set: Option<u64>,
+}
+
+/// Identity proven for a public Solana cluster endpoint before a gateway is constructed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClusterIdentity {
+    /// Cluster named by the caller in source.
+    pub cluster: PublicCluster,
+    /// Genesis hash reported by the endpoint, equal to the cluster's pinned genesis hash.
+    pub genesis_hash: String,
+    /// Validator implementation version when reported.
+    pub solana_core: Option<String>,
+    /// Active feature-set identifier when reported.
+    pub feature_set: Option<u64>,
+}
+
+/// Network identity a gateway proved before it could be used.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GatewayIdentity {
+    /// A local Surfpool process that answered both Surfpool-specific identity probes.
+    LocalSurfpool(SurfpoolIdentity),
+    /// A public Solana cluster that reported its pinned genesis hash.
+    PublicCluster(ClusterIdentity),
 }
 
 /// Latest blockhash plus the validity horizon returned by Surfpool.
@@ -237,11 +299,79 @@ pub struct AccountInfo {
     pub data: Vec<u8>,
 }
 
+/// Serializes outbound requests so a shared public endpoint is never addressed faster than its
+/// published rate limit allows. Loopback endpoints do not use one.
+#[derive(Debug)]
+struct RequestPacer {
+    min_interval: Duration,
+    next_slot: TokioMutex<Instant>,
+}
+
+impl RequestPacer {
+    fn new(min_interval: Duration) -> Self {
+        Self {
+            min_interval,
+            next_slot: TokioMutex::new(Instant::now()),
+        }
+    }
+
+    async fn acquire(&self) {
+        let mut next_slot = self.next_slot.lock().await;
+        let now = Instant::now();
+        if *next_slot > now {
+            sleep(*next_slot - now).await;
+        }
+        *next_slot = Instant::now() + self.min_interval;
+    }
+}
+
+/// Applies all three published limits of Solana's public RPC nodes: a total request ceiling per
+/// source address, a lower separate ceiling for each individual RPC method, and a ceiling on new
+/// connections. The connection ceiling is respected by bounding requests in flight, which keeps
+/// the HTTP/1.1 connection pool small enough to be reused instead of reopened.
+#[derive(Debug)]
+struct PublicRateLimiter {
+    total: RequestPacer,
+    per_method_interval: Duration,
+    methods: StdMutex<BTreeMap<&'static str, Arc<RequestPacer>>>,
+    in_flight: Arc<Semaphore>,
+}
+
+impl PublicRateLimiter {
+    fn new(total_interval: Duration, per_method_interval: Duration, max_in_flight: usize) -> Self {
+        Self {
+            total: RequestPacer::new(total_interval),
+            per_method_interval,
+            methods: StdMutex::new(BTreeMap::new()),
+            in_flight: Arc::new(Semaphore::new(max_in_flight)),
+        }
+    }
+
+    async fn acquire(&self, method: &'static str) -> Option<OwnedSemaphorePermit> {
+        let method_pacer = {
+            let mut methods = match self.methods.lock() {
+                Ok(methods) => methods,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            Arc::clone(
+                methods
+                    .entry(method)
+                    .or_insert_with(|| Arc::new(RequestPacer::new(self.per_method_interval))),
+            )
+        };
+        method_pacer.acquire().await;
+        self.total.acquire().await;
+        Arc::clone(&self.in_flight).acquire_owned().await.ok()
+    }
+}
+
 #[derive(Clone)]
 struct JsonRpcClient {
-    endpoint: SurfpoolRpcUrl,
+    endpoint: RpcEndpoint,
     client: Client,
     next_id: Arc<AtomicU64>,
+    limiter: Option<Arc<PublicRateLimiter>>,
+    read_retries: u32,
 }
 
 impl fmt::Debug for JsonRpcClient {
@@ -249,31 +379,94 @@ impl fmt::Debug for JsonRpcClient {
         formatter
             .debug_struct("JsonRpcClient")
             .field("endpoint", &self.endpoint)
+            .field("rate_limited", &self.limiter.is_some())
+            .field("read_retries", &self.read_retries)
             .finish_non_exhaustive()
     }
 }
 
 impl JsonRpcClient {
-    fn new(endpoint: SurfpoolRpcUrl) -> Result<Self, RpcError> {
-        let client = Client::builder()
+    fn new(endpoint: RpcEndpoint) -> Result<Self, RpcError> {
+        let public = endpoint.is_public_cluster();
+        let request_timeout = if public {
+            PUBLIC_CLUSTER_REQUEST_TIMEOUT
+        } else {
+            LOOPBACK_REQUEST_TIMEOUT
+        };
+        let mut builder = Client::builder()
             .no_proxy()
             .redirect(RedirectPolicy::none())
             .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(15))
+            .timeout(request_timeout);
+        if public {
+            builder = builder
+                .pool_max_idle_per_host(PUBLIC_CLUSTER_POOL_IDLE_CONNECTIONS)
+                .pool_idle_timeout(PUBLIC_CLUSTER_POOL_IDLE_TIMEOUT);
+        }
+        let client = builder
             .build()
             .map_err(|error| RpcError::invalid_input("connect", error.to_string()))?;
         Ok(Self {
             endpoint,
             client,
             next_id: Arc::new(AtomicU64::new(1)),
+            limiter: public.then(|| {
+                Arc::new(PublicRateLimiter::new(
+                    PUBLIC_CLUSTER_MIN_REQUEST_INTERVAL,
+                    PUBLIC_CLUSTER_MIN_METHOD_INTERVAL,
+                    PUBLIC_CLUSTER_MAX_IN_FLIGHT,
+                ))
+            }),
+            read_retries: if public {
+                PUBLIC_CLUSTER_READ_RETRIES
+            } else {
+                0
+            },
         })
     }
 
+    /// Issue a request, retrying transient read failures on a shared public endpoint.
+    ///
+    /// `sendTransaction` is never retried here. A failed send stays an ambiguous outcome that
+    /// only signature reconciliation is allowed to resolve.
     async fn request<T: DeserializeOwned>(
         &self,
         method: &'static str,
         params: Value,
     ) -> Result<T, RpcError> {
+        let attempts = if method == SEND_TRANSACTION {
+            0
+        } else {
+            self.read_retries
+        };
+        let mut backoff = PUBLIC_CLUSTER_RETRY_BACKOFF;
+        let mut attempt = 0;
+        loop {
+            match self.request_once(method, params.clone()).await {
+                Ok(value) => return Ok(value),
+                Err(error) => {
+                    if attempt >= attempts || error.class() != RpcFailureClass::Transient {
+                        return Err(error);
+                    }
+                    sleep(backoff).await;
+                    backoff = backoff
+                        .saturating_mul(2)
+                        .min(PUBLIC_CLUSTER_RETRY_BACKOFF_MAX);
+                    attempt += 1;
+                }
+            }
+        }
+    }
+
+    async fn request_once<T: DeserializeOwned>(
+        &self,
+        method: &'static str,
+        params: Value,
+    ) -> Result<T, RpcError> {
+        let _in_flight = match self.limiter.as_ref() {
+            Some(limiter) => limiter.acquire(method).await,
+            None => None,
+        };
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let response = self
             .client
@@ -347,6 +540,14 @@ impl JsonRpcClient {
             solana_core: result.solana_core,
             feature_set: result.feature_set,
         })
+    }
+
+    async fn cluster_version(&self) -> Result<VersionResponse, RpcError> {
+        self.request(GET_VERSION, json!([])).await
+    }
+
+    async fn genesis_hash(&self) -> Result<String, RpcError> {
+        self.request(GET_GENESIS_HASH, json!([])).await
     }
 
     async fn verify_surfnet_info(&self) -> Result<(), RpcError> {
@@ -576,47 +777,132 @@ impl JsonRpcClient {
     }
 }
 
-/// Verified chain gateway with no constructor that accepts a public RPC URL.
+/// Chain gateway that proves the network identity of its endpoint before it can be used.
+///
+/// The default [`SolanaGateway::connect`] path accepts loopback Surfpool endpoints only.
+/// [`SolanaGateway::connect_public_cluster`] is the single constructor that leaves loopback, and
+/// it requires an [`RpcEndpoint`] that was itself built from a [`PublicCluster`] value in source.
 #[derive(Clone, Debug)]
-pub struct SurfpoolGateway {
+pub struct SolanaGateway {
     rpc: JsonRpcClient,
-    identity: SurfpoolIdentity,
+    identity: GatewayIdentity,
 }
 
-impl SurfpoolGateway {
+impl SolanaGateway {
     /// Connect, verify Surfpool-specific identity, and only then return a gateway.
     ///
     /// # Errors
     ///
-    /// Returns [`RpcError`] when transport fails or either identity probe is absent, malformed,
-    /// or reports a Surfpool version different from [`EXPECTED_SURFPOOL_VERSION`].
-    pub async fn connect(endpoint: SurfpoolRpcUrl) -> Result<Self, RpcError> {
+    /// Returns [`RpcError`] when the endpoint is not loopback, transport fails, or either
+    /// identity probe is absent, malformed, or reports a Surfpool version different from
+    /// [`EXPECTED_SURFPOOL_VERSION`].
+    pub async fn connect(endpoint: RpcEndpoint) -> Result<Self, RpcError> {
+        if endpoint.is_public_cluster() {
+            return Err(RpcError::identity(
+                GET_VERSION,
+                "the Surfpool gateway refuses a public cluster endpoint",
+            ));
+        }
         let rpc = JsonRpcClient::new(endpoint)?;
         let identity = rpc.version().await?;
         rpc.verify_surfnet_info().await?;
-        Ok(Self { rpc, identity })
+        Ok(Self {
+            rpc,
+            identity: GatewayIdentity::LocalSurfpool(identity),
+        })
+    }
+
+    /// Connect to a named public Solana cluster and prove its genesis hash before returning.
+    ///
+    /// This is the only constructor that addresses a network outside loopback. It is reachable
+    /// only from source that names a [`PublicCluster`]; no configuration file, environment
+    /// variable, or CLI flag can reach it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError`] when the endpoint was not declared for a public cluster, transport
+    /// fails, or the endpoint reports a genesis hash other than the pinned one for that cluster.
+    pub async fn connect_public_cluster(endpoint: RpcEndpoint) -> Result<Self, RpcError> {
+        let cluster = endpoint.public_cluster_target().ok_or_else(|| {
+            RpcError::identity(
+                GET_GENESIS_HASH,
+                "public cluster gateway requires an endpoint declared for a public cluster",
+            )
+        })?;
+        let rpc = JsonRpcClient::new(endpoint)?;
+        let genesis_hash = rpc.genesis_hash().await?;
+        if genesis_hash != cluster.genesis_hash() {
+            return Err(RpcError::identity(
+                GET_GENESIS_HASH,
+                format!(
+                    "expected {cluster} genesis {}, got {genesis_hash}",
+                    cluster.genesis_hash()
+                ),
+            ));
+        }
+        let version = rpc.cluster_version().await?;
+        if version.surfnet_version.is_some() {
+            return Err(RpcError::identity(
+                GET_VERSION,
+                "public cluster endpoint reported a Surfpool version",
+            ));
+        }
+        Ok(Self {
+            rpc,
+            identity: GatewayIdentity::PublicCluster(ClusterIdentity {
+                cluster,
+                genesis_hash,
+                solana_core: version.solana_core,
+                feature_set: version.feature_set,
+            }),
+        })
     }
 
     /// Repeat both Surfpool identity probes against the connected endpoint.
     ///
     /// # Errors
     ///
-    /// Returns [`RpcError`] when the endpoint no longer proves the expected Surfpool identity.
+    /// Returns [`RpcError`] when the gateway is not a local Surfpool gateway or the endpoint no
+    /// longer proves the expected Surfpool identity.
     pub async fn doctor(&self) -> Result<SurfpoolIdentity, RpcError> {
+        if self.rpc.endpoint.is_public_cluster() {
+            return Err(RpcError::identity(
+                GET_SURFNET_INFO,
+                "doctor probes are defined for local Surfpool endpoints only",
+            ));
+        }
         let identity = self.rpc.version().await?;
         self.rpc.verify_surfnet_info().await?;
         Ok(identity)
     }
 
-    /// Return the identity proven before construction.
+    /// Return the network identity proven before construction.
     #[must_use]
-    pub const fn identity(&self) -> &SurfpoolIdentity {
+    pub const fn identity(&self) -> &GatewayIdentity {
         &self.identity
     }
 
-    /// Return the validated local RPC URL.
+    /// Return the Surfpool version when this gateway addresses a local surfnet.
     #[must_use]
-    pub const fn endpoint(&self) -> &SurfpoolRpcUrl {
+    pub fn surfnet_version(&self) -> Option<&str> {
+        match &self.identity {
+            GatewayIdentity::LocalSurfpool(identity) => Some(identity.surfnet_version.as_str()),
+            GatewayIdentity::PublicCluster(_) => None,
+        }
+    }
+
+    /// Return the cluster identity when this gateway addresses a public cluster.
+    #[must_use]
+    pub const fn cluster_identity(&self) -> Option<&ClusterIdentity> {
+        match &self.identity {
+            GatewayIdentity::LocalSurfpool(_) => None,
+            GatewayIdentity::PublicCluster(identity) => Some(identity),
+        }
+    }
+
+    /// Return the validated RPC endpoint.
+    #[must_use]
+    pub const fn endpoint(&self) -> &RpcEndpoint {
         &self.rpc.endpoint
     }
 
@@ -773,7 +1059,7 @@ impl SurfpoolGateway {
 }
 
 #[async_trait::async_trait]
-impl ChainGateway for SurfpoolGateway {
+impl ChainGateway for SolanaGateway {
     async fn simulate(&self, transaction: &[u8]) -> Result<SimulationReceipt, CookerError> {
         let simulation = self.simulate_transaction(transaction).await?;
         Ok(SimulationReceipt {
@@ -1172,8 +1458,33 @@ mod tests {
     use super::*;
     use crate::RpcFailureClass;
 
-    fn endpoint(server: &MockServer) -> Result<SurfpoolRpcUrl, RpcError> {
+    fn endpoint(server: &MockServer) -> Result<RpcEndpoint, RpcError> {
         server.uri().parse()
+    }
+
+    #[tokio::test]
+    async fn surfpool_connect_refuses_a_public_cluster_endpoint()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let url = url::Url::parse("https://api.devnet.solana.com")?;
+        let public = RpcEndpoint::public_cluster(url, PublicCluster::Devnet)?;
+        let error = SolanaGateway::connect(public)
+            .await
+            .err()
+            .ok_or("the Surfpool gateway accepted a public cluster endpoint")?;
+        assert_eq!(error.class(), RpcFailureClass::Identity);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn public_cluster_connect_refuses_a_loopback_endpoint()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let server = MockServer::start().await;
+        let error = SolanaGateway::connect_public_cluster(endpoint(&server)?)
+            .await
+            .err()
+            .ok_or("the public cluster gateway accepted a loopback endpoint")?;
+        assert_eq!(error.class(), RpcFailureClass::Identity);
+        Ok(())
     }
 
     #[tokio::test]
@@ -1189,7 +1500,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let error = SurfpoolGateway::connect(endpoint(&server)?).await;
+        let error = SolanaGateway::connect(endpoint(&server)?).await;
         let error = error
             .err()
             .ok_or("generic JSON-RPC unexpectedly passed identity check")?;
@@ -1223,7 +1534,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let error = SurfpoolGateway::connect(endpoint(&server)?).await;
+        let error = SolanaGateway::connect(endpoint(&server)?).await;
         let error = error
             .err()
             .ok_or("missing Surfpool info method unexpectedly passed")?;

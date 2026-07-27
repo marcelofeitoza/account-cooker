@@ -1,4 +1,4 @@
-//! Surfpool identity guard, JSON-RPC gateway, local signing, and action adapters.
+//! Network identity guard, JSON-RPC gateway, local signing, and action adapters.
 
 #![forbid(unsafe_code)]
 
@@ -19,11 +19,11 @@ pub use jupiter::{
     JupiterAccountMeta, JupiterAdapter, JupiterApiClient, JupiterInstruction, JupiterPlatformFee,
     JupiterPolicy, JupiterQuote, JupiterRouteStep, JupiterSwapInfo, JupiterSwapInstructions,
 };
-pub use network::SurfpoolRpcUrl;
+pub use network::{PublicCluster, RpcEndpoint, RpcEndpointClass};
 pub use rpc::{
-    AccountInfo, EXPECTED_SURFPOOL_VERSION, EpochInfo, LatestBlockhash, LocalSignatureRecord,
-    RpcSimulation, SignatureStatus, SurfpoolGateway, SurfpoolIdentity, TokenBalanceRecord,
-    TransactionRecord, VoteAccount,
+    AccountInfo, ClusterIdentity, EXPECTED_SURFPOOL_VERSION, EpochInfo, GatewayIdentity,
+    LatestBlockhash, LocalSignatureRecord, RpcSimulation, SignatureStatus, SolanaGateway,
+    SurfpoolIdentity, TokenBalanceRecord, TransactionRecord, VoteAccount,
 };
 pub use signer::LocalKeypair;
 pub use stake::NativeStakeAdapter;

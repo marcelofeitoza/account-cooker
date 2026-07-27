@@ -24,7 +24,7 @@ use cooker_core::{
 use cooker_runtime::{
     ExecutionCheckpoint, ExecutionResult, FaultInjector, NoFaults, RuntimeEngine, RuntimeSettings,
 };
-use cooker_solana::{LocalKeypair, NativeTransferAdapter, SurfpoolGateway, SurfpoolRpcUrl};
+use cooker_solana::{LocalKeypair, NativeTransferAdapter, RpcEndpoint, SolanaGateway};
 use cooker_store::{RunRegistration, Store, StoreIdentity};
 use serde_json::json;
 use solana_pubkey::Pubkey;
@@ -90,11 +90,11 @@ impl FaultInjector for LoseOneSendResponse {
 
 #[derive(Debug)]
 struct ConfirmSubmissionGateway {
-    inner: Arc<SurfpoolGateway>,
+    inner: Arc<SolanaGateway>,
 }
 
 impl ConfirmSubmissionGateway {
-    fn new(inner: Arc<SurfpoolGateway>) -> Self {
+    fn new(inner: Arc<SolanaGateway>) -> Self {
         Self { inner }
     }
 }
@@ -196,13 +196,16 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
         || project_root.join(".surfpool/keys/funder.json"),
         PathBuf::from,
     );
-    let endpoint: SurfpoolRpcUrl = rpc_url.parse()?;
-    let gateway = Arc::new(SurfpoolGateway::connect(endpoint.clone()).await?);
+    let endpoint: RpcEndpoint = rpc_url.parse()?;
+    let gateway = Arc::new(SolanaGateway::connect(endpoint.clone()).await?);
     let signer = Arc::new(LocalKeypair::load(&project_root, &signer_path)?);
     let funder = signer.pubkey();
     let funder_address = funder.to_string();
     let funder_before = gateway.balance(&funder).await?;
-    let surfpool_version = gateway.identity().surfnet_version.clone();
+    let surfpool_version = gateway
+        .surfnet_version()
+        .map(str::to_owned)
+        .ok_or_else(|| io::Error::other("soak gateway did not prove a local Surfpool identity"))?;
 
     let run_id = RunId::new();
     let scheduled_at = Utc::now();
@@ -334,7 +337,7 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     };
     assert_eq!(usize::from(restart_provenance.is_some()), surfpool_restarts);
 
-    let gateway = Arc::new(SurfpoolGateway::connect(endpoint).await?);
+    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
     let signer = Arc::new(LocalKeypair::load(&project_root, &signer_path)?);
     let store = Arc::new(Store::open(
         &database_path,
@@ -681,7 +684,7 @@ fn deterministic_destination(sequence: u64) -> Pubkey {
 
 fn runtime(
     store: Arc<Store>,
-    gateway: Arc<SurfpoolGateway>,
+    gateway: Arc<SolanaGateway>,
     signer: Arc<LocalKeypair>,
     destinations: &BTreeSet<String>,
     max_concurrency: usize,

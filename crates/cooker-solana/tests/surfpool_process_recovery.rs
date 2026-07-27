@@ -24,7 +24,7 @@ use cooker_runtime::{
     ExecutionCheckpoint, ExecutionResult, FaultInjector, NoFaults, RuntimeEngine, RuntimeSettings,
 };
 use cooker_solana::{
-    LocalKeypair, NativeTransferAdapter, SurfpoolGateway, SurfpoolRpcUrl, TransactionRecord,
+    LocalKeypair, NativeTransferAdapter, RpcEndpoint, SolanaGateway, TransactionRecord,
 };
 use cooker_store::{Store, StoreIdentity};
 use serde_json::{Value, json};
@@ -63,7 +63,7 @@ struct PauseAt {
 
 #[derive(Debug)]
 struct DurableCountingGateway {
-    gateway: Arc<SurfpoolGateway>,
+    gateway: Arc<SolanaGateway>,
     submit_log: PathBuf,
 }
 
@@ -431,7 +431,7 @@ async fn every_process_crash_checkpoint_recovers_on_real_surfpool() -> TestResul
     let report = json!({
         "schema_version": 1,
         "scenario": "six_checkpoint_real_process_crash_recovery",
-        "surfpool_version": gateway.identity().surfnet_version,
+        "surfpool_version": gateway.surfnet_version(),
         "checkpoint_count": evidence.len(),
         "confirmed_actions": confirmed,
         "expired_without_submission": expired,
@@ -561,7 +561,7 @@ async fn surfpool_recovery_child() -> TestResult {
 
 fn runtime(
     store: Arc<Store>,
-    gateway: &Arc<SurfpoolGateway>,
+    gateway: &Arc<SolanaGateway>,
     signer: &Arc<LocalKeypair>,
     destination: Pubkey,
     submit_log: &Path,
@@ -728,7 +728,7 @@ fn assert_crash_record(checkpoint: ExecutionCheckpoint, record: &cooker_store::R
 }
 
 async fn wait_for_transaction(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     signature: &Signature,
 ) -> Result<TransactionRecord, Box<dyn Error>> {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -748,7 +748,7 @@ async fn wait_for_transaction(
 }
 
 async fn advance_past_block_height(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     target: u64,
 ) -> Result<u64, Box<dyn Error>> {
     let mut advanced = 0_u64;
@@ -781,12 +781,12 @@ fn count_submit_attempts(path: &Path) -> Result<usize, io::Error> {
     }
 }
 
-async fn live_resources() -> Result<(Arc<SurfpoolGateway>, Arc<LocalKeypair>), Box<dyn Error>> {
+async fn live_resources() -> Result<(Arc<SolanaGateway>, Arc<LocalKeypair>), Box<dyn Error>> {
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let rpc_url = required_env("COOKER_RPC_URL")?;
     let signer_path = PathBuf::from(required_env("COOKER_SIGNER_PATH")?);
-    let endpoint: SurfpoolRpcUrl = rpc_url.parse()?;
-    let gateway = Arc::new(SurfpoolGateway::connect(endpoint).await?);
+    let endpoint: RpcEndpoint = rpc_url.parse()?;
+    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
     let signer = Arc::new(LocalKeypair::load(&project_root, signer_path)?);
     Ok((gateway, signer))
 }

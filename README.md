@@ -32,6 +32,9 @@ privacy hypotheses as plainly as successful ones.
   signals across five fixed seeds and feature ablations.
 - Deterministic virtual and real Surfpool soak harnesses plus a sanitized,
   checksum-bearing evidence pack.
+- One opt-in bounded public devnet soak with committed, explorer-checkable transaction
+  signatures, and a written statement of which loopback measurements survive the move to a
+  public network and which do not.
 
 ## Claim Boundary
 
@@ -40,16 +43,24 @@ confidentiality, or protection from RPC/IP correlation. A common funding edge re
 directly observable. The evaluator measures named synthetic attacker models; it does not
 establish resemblance to the full population of human Solana users.
 
-The project also does not implement public-network execution, self-trading, artificial
-volume, governance voting, referral or airdrop farming, NFT manipulation, dust spam,
-bridge churn, or deceptive multi-hop funding. Every chain transaction in development and
-evidence runs executes only inside loopback Surfpool.
+The project does not implement self-trading, artificial volume, governance voting, referral
+or airdrop farming, NFT manipulation, dust spam, bridge churn, or deceptive multi-hop
+funding.
 
-The current topology is one local controller, one SQLite store, local signer files, and
-one loopback Surfpool process. The stateful adapter is native Solana stake, not Marinade.
-Deterministic Jupiter evidence uses a reviewed snapshot captured from a lazy fork at a fixed slot;
-its age and limited account set make it reproducible, not representative of current market
-state.
+Chain execution is loopback Surfpool by default and by configuration. There is exactly one
+public-network path, an opt-in bounded devnet soak that must be started by hand and that
+names its cluster in Rust source; no configuration file, environment variable, or CLI flag
+can send a transaction off loopback, and the canonical `scripts/full-demo.sh` run never
+does. Every transaction in the canonical evidence pack is loopback. The separate devnet
+record and the honest comparison between the two are in
+[the devnet run and topology delta](docs/DEVNET.md). There is no mainnet execution path.
+
+The current topology is one local controller, one SQLite store, local signer files, and one
+loopback Surfpool process, plus that single bounded devnet run against one public RPC
+endpoint. A bounded run is not a sustained-load proof and devnet is not mainnet. The
+stateful adapter is native Solana stake, not Marinade. Deterministic Jupiter evidence uses a
+reviewed snapshot captured from a lazy fork at a fixed slot; its age and limited account set
+make it reproducible, not representative of current market state.
 
 ## Reproduce It
 
@@ -93,6 +104,16 @@ the six-checkpoint process-crash matrix, and native stake. Stake runs last becau
 advances Surfpool across epochs. The demo uses fresh, isolated, offline Surfpool state; no
 chain RPC request leaves loopback and no transaction is written to a public RPC.
 
+The public devnet soak is deliberately not part of that command. It spends real devnet SOL,
+so it is opt-in, run by hand, and recorded separately:
+
+```bash
+./scripts/devnet-soak.sh --transactions 200
+```
+
+Read [the devnet run and topology delta](docs/DEVNET.md) before citing either result. It
+states which loopback numbers carry over to a public network and which do not.
+
 ## CLI
 
 ```text
@@ -127,9 +148,8 @@ was loaded and whether state changed, making the safety boundary machine-verifia
 | `cooker-cli` | configuration, operator commands, virtual soak, evidence-facing output |
 
 The implementation is clean-room MIT code based on the bounty specification and public
-Solana, Surfpool, Jupiter, Raydium, and SPL interfaces. It is standalone from Cloak and has
-no code, service, data, fixture, key, or runtime dependency on Cloak or another private
-project.
+Solana, Surfpool, Jupiter, Raydium, and SPL interfaces. It is standalone and has no code,
+service, data, fixture, key, or runtime dependency on any private project.
 
 ## Evidence
 
@@ -144,6 +164,7 @@ and snapshot hashes, supported metrics, commands, and checksums. See
 - [Architecture](docs/ARCHITECTURE.md)
 - [Threat model and claim policy](docs/THREAT_MODEL.md)
 - [Surfpool runbook](docs/SURFPOOL.md)
+- [Public devnet run and topology delta](docs/DEVNET.md)
 - [Validation and evidence gates](docs/VALIDATION.md)
 - [Bounty eligibility audit](docs/ELIGIBILITY.md)
 

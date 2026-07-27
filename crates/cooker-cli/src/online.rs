@@ -26,7 +26,7 @@ use cooker_runtime::{
 };
 use cooker_solana::{
     FleetManifest, JupiterAdapter, JupiterApiClient, JupiterPolicy, LocalKeypair,
-    NativeStakeAdapter, NativeTransferAdapter, SplTransferAdapter, SurfpoolGateway, SurfpoolRpcUrl,
+    NativeStakeAdapter, NativeTransferAdapter, RpcEndpoint, SolanaGateway, SplTransferAdapter,
 };
 use cooker_store::{RecoveryPreview, RunRegistration, Store, StoreIdentity, StoreStatusSnapshot};
 use serde::Serialize;
@@ -873,7 +873,7 @@ fn build_fleet_runtime(
     root: &Path,
     manifest: &FleetManifest,
     store: Arc<Store>,
-    gateway: &Arc<SurfpoolGateway>,
+    gateway: &Arc<SolanaGateway>,
     clock: Arc<dyn Clock>,
 ) -> Result<Arc<FleetRuntime>> {
     let signers = manifest
@@ -918,7 +918,7 @@ fn build_fleet_runtime(
 
 fn build_agent_adapters(
     file: &FileConfig,
-    gateway: &Arc<SurfpoolGateway>,
+    gateway: &Arc<SolanaGateway>,
     signer: &Arc<LocalKeypair>,
     jupiter: Option<&(Arc<JupiterApiClient>, JupiterPolicy)>,
     vote_account: Option<Pubkey>,
@@ -1063,7 +1063,7 @@ fn build_funding_runtime(
     file: &FileConfig,
     manifest: &FleetManifest,
     store: &Arc<Store>,
-    gateway: &Arc<SurfpoolGateway>,
+    gateway: &Arc<SolanaGateway>,
     funder: &Arc<LocalKeypair>,
     funding_agent_id: AgentId,
     amount: u64,
@@ -1210,12 +1210,12 @@ fn funding_action(
     }
 }
 
-async fn connect_surfpool(file: &FileConfig) -> Result<Arc<SurfpoolGateway>> {
-    let endpoint = SurfpoolRpcUrl::new(file.core.network.rpc_url.clone())
+async fn connect_surfpool(file: &FileConfig) -> Result<Arc<SolanaGateway>> {
+    let endpoint = RpcEndpoint::new(file.core.network.rpc_url.clone())
         .map_err(anyhow::Error::msg)
         .context("RPC endpoint is not an explicit-loopback Surfpool URL")?;
     let gateway = Arc::new(
-        SurfpoolGateway::connect(endpoint)
+        SolanaGateway::connect(endpoint)
             .await
             .map_err(anyhow::Error::msg)
             .context("Surfpool identity preflight failed")?,
@@ -1228,7 +1228,7 @@ async fn connect_surfpool(file: &FileConfig) -> Result<Arc<SurfpoolGateway>> {
     Ok(gateway)
 }
 
-fn adapter_context(file: &FileConfig, gateway: &SurfpoolGateway, signer: String) -> AdapterContext {
+fn adapter_context(file: &FileConfig, gateway: &SolanaGateway, signer: String) -> AdapterContext {
     AdapterContext {
         rpc_url: gateway.endpoint().as_url().clone(),
         signer,

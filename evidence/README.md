@@ -7,10 +7,17 @@ used to claim the canonical scale gates.
 Status: the canonical `evidence/final` pack and both fresh-clone repetitions passed on
 2026-07-18 from source commit `8cc338e968fb2ff561508ba2ca69d113e20035b9`.
 
+`evidence/devnet` is a separate, smaller record from one bounded public Solana devnet run.
+It is produced by the opt-in `scripts/devnet-soak.sh` and is never part of the canonical
+pack, because the canonical pack is defined to contain no public-network transaction. The
+two records are kept side by side deliberately; see
+[the devnet run and topology delta](../docs/DEVNET.md) for what transfers between them.
+
 ## Generate
 
 ```bash
-./scripts/full-demo.sh
+./scripts/full-demo.sh                                # evidence/final
+./scripts/devnet-soak.sh --transactions 200 --promote # evidence/devnet
 ```
 
 The command validates the raw run and atomically creates `evidence/final`. It refuses a
@@ -38,6 +45,8 @@ session provenance, or unsanitized signature samples.
 - `checksums.txt`: SHA-256 for every other file in the pack.
 - `../clean-clone-verification.json`: sanitized hashes and invariant results for the
   primary canonical run and two independent clean-clone repetitions.
+- `../devnet/devnet-soak.json` and `../devnet/README.md`: the separate bounded public devnet
+  record, with full explorer-checkable signatures and its own checksum file.
 
 Verify the pack from this directory with either platform command:
 
@@ -51,8 +60,14 @@ shasum -a 256 --check checksums.txt
 
 The committed pack contains no generated keypair, signed transaction bytes, full local
 signature, mutable database, raw RPC/program log, absolute workstation path, credential,
-or decompressed account snapshot. Those artifacts stay in ignored `.surfpool` and
-`evidence/raw` directories and are not needed to reproduce the proof.
+or decompressed account snapshot. Those artifacts stay in ignored `.surfpool`, `.devnet`,
+and `evidence/raw` directories and are not needed to reproduce the proof.
+
+`evidence/devnet` deliberately commits full transaction signatures. A local Surfpool
+signature means nothing outside the surfnet that produced it, so shortening it costs a
+reviewer nothing. A devnet signature is public record and is the only thing that lets
+someone else check the run, so redacting it would remove the evidence. No key, no signed
+transaction bytes, and no database leave the ignored directories in either case.
 
 ## Interpretation
 
@@ -64,7 +79,9 @@ particular:
 - evaluator attacks and ownership labels use synthetic known ground truth;
 - reviewed Jupiter state is a 21-account offline snapshot captured from a lazy fork and
   frozen at slot `433717382`;
-- execution uses one local controller, SQLite store, local signers, and loopback Surfpool;
+- execution in this pack uses one local controller, SQLite store, local signers, and
+  loopback Surfpool; the separate `evidence/devnet` record covers one bounded public devnet
+  run and is not a sustained-load result;
 - the stateful adapter is native Solana stake, not Marinade.
 
 The separate `docs/ELIGIBILITY.md` audit covers the human submission path and disclosed

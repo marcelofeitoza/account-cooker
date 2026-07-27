@@ -5,10 +5,10 @@ use thiserror::Error;
 
 const SEND_TRANSACTION: &str = "sendTransaction";
 
-/// Operational meaning of a Surfpool RPC failure.
+/// Operational meaning of an RPC failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RpcFailureClass {
-    /// The verified endpoint is not Surfpool or is otherwise unsafe.
+    /// The endpoint did not prove the expected network identity, or is otherwise unsafe.
     Identity,
     /// Retrying the same request cannot make it valid.
     Deterministic,
@@ -20,7 +20,7 @@ pub enum RpcFailureClass {
 
 #[derive(Debug, Error)]
 enum RpcErrorKind {
-    #[error("unsafe Surfpool identity: {0}")]
+    #[error("unsafe network identity: {0}")]
     Identity(String),
     #[error("invalid request input: {0}")]
     InvalidInput(String),
@@ -48,9 +48,9 @@ enum RpcErrorKind {
     },
 }
 
-/// Classified error returned by the Surfpool JSON-RPC transport.
+/// Classified error returned by the JSON-RPC transport.
 #[derive(Debug, Error)]
-#[error("Surfpool RPC {method} failed: {kind}")]
+#[error("Solana RPC {method} failed: {kind}")]
 pub struct RpcError {
     method: &'static str,
     kind: RpcErrorKind,
@@ -181,7 +181,10 @@ impl From<RpcError> for CookerError {
 }
 
 fn is_identity_method(method: &str) -> bool {
-    matches!(method, "getVersion" | "surfnet_getSurfnetInfo")
+    matches!(
+        method,
+        "getVersion" | "surfnet_getSurfnetInfo" | "getGenesisHash"
+    )
 }
 
 fn sanitize(detail: impl AsRef<str>) -> String {

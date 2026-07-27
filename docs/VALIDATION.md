@@ -127,6 +127,8 @@ has no `lint_policy` key, while a fresh canonical run emits one.
 | budget exhaustion | policy/property tests | no transaction signature beyond limit |
 | kill switch | CLI/runtime tests | no network, signer load, claim, or state change |
 | compressed soak | Surfpool soak | zero duplicate or unresolved actions/signatures |
+| public cluster identity | unit plus devnet soak | configuration cannot reach a public endpoint; the devnet gateway proves a pinned genesis hash |
+| bounded public devnet run | devnet soak | same invariants on a real cluster, with the confirmation rate measured rather than asserted |
 
 ## 4. Scale Runs
 
@@ -152,6 +154,34 @@ has no `lint_policy` key, while a fresh canonical run emits one.
 
 Fewer than 1,000 confirmed soak transactions is a failed canonical gate. Correctness is
 never weakened to manufacture that number.
+
+### Bounded public devnet run
+
+Separate from the canonical gate and never part of it, because the canonical pack is defined
+to contain no public-network transaction. `scripts/devnet-soak.sh` runs the same store,
+runtime engine, policy, and native-transfer adapter against `https://api.devnet.solana.com`.
+
+Its gate asserts only what the engine controls:
+
+- the endpoint proves devnet's genesis hash before a signer is loaded;
+- every planned action reaches a terminal state, and the states sum to the planned count;
+- zero duplicate logical intents and zero duplicate signatures;
+- zero budget violations;
+- zero unresolved Submitted or Unknown actions after reconciliation;
+- the injected response loss reconciles to a confirmation without resubmission;
+- exact source debit and destination credit for every confirmed action;
+- the payer balance equation closes over confirmed transfers plus observed fees;
+- one full runtime-stack restart recovered from the WAL file mid-run;
+- every unconfirmed action carries a classified cause, and the causes sum to the unconfirmed
+  count, so a non-inclusion can never be reported without a reason.
+
+The confirmation rate is measured and published, never asserted. Inclusion is the cluster's
+decision, not the engine's, so gating on it would reward tuning the number instead of
+reporting it. Full signatures are committed so a reviewer can check both the confirmations
+and the non-inclusions against the cluster directly.
+
+Read [the devnet run and topology delta](DEVNET.md) before comparing the two runs. It states
+which loopback measurements carry over to a public network and which do not.
 
 ## 5. Evaluation Runs
 

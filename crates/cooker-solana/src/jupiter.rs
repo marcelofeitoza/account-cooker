@@ -35,7 +35,7 @@ use tokio::time::{Instant, sleep};
 use zeroize::Zeroize;
 
 use crate::{
-    LatestBlockhash, LocalKeypair, SignedWireTransaction, SurfpoolGateway,
+    LatestBlockhash, LocalKeypair, SignedWireTransaction, SolanaGateway,
     build_signed_v0_transaction,
 };
 
@@ -1037,7 +1037,7 @@ impl JupiterApiClient {
 /// Coordinator for unsigned Jupiter planning and local transaction assembly.
 #[derive(Clone, Debug)]
 pub struct JupiterAdapter {
-    gateway: Arc<SurfpoolGateway>,
+    gateway: Arc<SolanaGateway>,
     signer: Arc<LocalKeypair>,
     client: Arc<JupiterApiClient>,
     policy: JupiterPolicy,
@@ -1047,7 +1047,7 @@ impl JupiterAdapter {
     /// Create an adapter from a verified Surfpool gateway, local signer, planner, and policy.
     #[must_use]
     pub const fn new(
-        gateway: Arc<SurfpoolGateway>,
+        gateway: Arc<SolanaGateway>,
         signer: Arc<LocalKeypair>,
         client: Arc<JupiterApiClient>,
         policy: JupiterPolicy,
@@ -1290,7 +1290,7 @@ impl ActionAdapter for JupiterAdapter {
 
 fn validate_adapter_context(
     context: &AdapterContext,
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     signer: &LocalKeypair,
 ) -> Result<(), CookerError> {
     if context.rpc_url != *gateway.endpoint().as_url() {
@@ -1308,7 +1308,7 @@ fn validate_adapter_context(
 }
 
 async fn validate_pre_swap_balances(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     signer: &LocalKeypair,
     action: &PlannedAction,
     input_mint: Pubkey,
@@ -1351,7 +1351,7 @@ async fn validate_pre_swap_balances(
 }
 
 async fn read_classic_token_amount(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     address: &Pubkey,
     mint: &Pubkey,
     owner: &Pubkey,
@@ -1375,7 +1375,7 @@ async fn read_classic_token_amount(
 }
 
 async fn resolve_lookup_tables(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     response: &JupiterSwapInstructions,
 ) -> Result<Vec<AddressLookupTableAccount>, CookerError> {
     let addresses = parse_lookup_table_addresses(response)?;
@@ -1541,7 +1541,7 @@ fn validate_prepared_swap(
 }
 
 async fn observe_swap_until_terminal(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     context: &AdapterContext,
     prepared: &PreparedAction,
 ) -> Result<ChainReceipt, CookerError> {

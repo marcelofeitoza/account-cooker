@@ -14,7 +14,7 @@ use cooker_core::{
     ConfirmationStatus, PlannedAction, RunId,
 };
 use cooker_solana::{
-    LocalKeypair, SplTransferAdapter, SurfpoolGateway, SurfpoolRpcUrl, build_signed_transaction,
+    LocalKeypair, RpcEndpoint, SolanaGateway, SplTransferAdapter, build_signed_transaction,
     build_signed_transaction_with_signers,
 };
 use serde_json::json;
@@ -275,7 +275,7 @@ async fn classic_spl_adapter_proves_creation_transfer_and_exact_overhead()
     let evidence = json!({
         "schema_version": 1,
         "scenario": "classic_spl_transfer_with_destination_ata_creation",
-        "surfpool_version": gateway.identity().surfnet_version,
+        "surfpool_version": gateway.surfnet_version(),
         "elapsed_ms": u64::try_from(started.elapsed().as_millis())?,
         "mint": mint.to_string(),
         "source_ata": source.to_string(),
@@ -308,15 +308,15 @@ async fn classic_spl_adapter_proves_creation_transfer_and_exact_overhead()
 
 async fn live_context(
     project_root: &Path,
-) -> Result<(Arc<SurfpoolGateway>, Arc<LocalKeypair>, AdapterContext), Box<dyn std::error::Error>> {
+) -> Result<(Arc<SolanaGateway>, Arc<LocalKeypair>, AdapterContext), Box<dyn std::error::Error>> {
     let rpc_url =
         std::env::var("COOKER_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8899".to_owned());
     let signer_path = std::env::var_os("COOKER_SIGNER_PATH").map_or_else(
         || project_root.join(".surfpool/keys/funder.json"),
         PathBuf::from,
     );
-    let endpoint: SurfpoolRpcUrl = rpc_url.parse()?;
-    let gateway = Arc::new(SurfpoolGateway::connect(endpoint).await?);
+    let endpoint: RpcEndpoint = rpc_url.parse()?;
+    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
     let signer = Arc::new(LocalKeypair::load(project_root, signer_path)?);
     let context = AdapterContext {
         rpc_url: gateway.endpoint().as_url().clone(),
@@ -327,7 +327,7 @@ async fn live_context(
 }
 
 async fn required_account(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     address: &Pubkey,
 ) -> Result<cooker_solana::AccountInfo, Box<dyn std::error::Error>> {
     gateway
@@ -337,7 +337,7 @@ async fn required_account(
 }
 
 async fn submit_and_confirm(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     transaction: &[u8],
 ) -> Result<Signature, Box<dyn std::error::Error>> {
     let simulation = gateway.simulate(transaction).await?;

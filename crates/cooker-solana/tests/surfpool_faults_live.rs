@@ -8,7 +8,7 @@ use cooker_core::{
     ConfirmationStatus, CookerError, PlannedAction, RunId,
 };
 use cooker_solana::{
-    LocalKeypair, NativeTransferAdapter, RpcFailureClass, SurfpoolGateway, SurfpoolRpcUrl,
+    LocalKeypair, NativeTransferAdapter, RpcEndpoint, RpcFailureClass, SolanaGateway,
     build_signed_transaction,
 };
 use reqwest::{Client, redirect::Policy as RedirectPolicy};
@@ -90,7 +90,7 @@ async fn stale_insufficient_simulation_and_lost_response_reconcile_on_surfpool()
 
     let (proxy_endpoint, mut dropped_send, proxy_task) =
         spawn_loss_proxy(gateway.endpoint().as_url().as_str()).await?;
-    let proxy_gateway = Arc::new(SurfpoolGateway::connect(proxy_endpoint).await?);
+    let proxy_gateway = Arc::new(SolanaGateway::connect(proxy_endpoint).await?);
     let proxy_context = AdapterContext {
         rpc_url: proxy_gateway.endpoint().as_url().clone(),
         signer: payer.to_string(),
@@ -154,7 +154,7 @@ async fn stale_insufficient_simulation_and_lost_response_reconcile_on_surfpool()
     let evidence = json!({
         "schema_version": 1,
         "scenario": "surfpool_fault_and_same_signature_reconciliation",
-        "surfpool_version": gateway.identity().surfnet_version,
+        "surfpool_version": gateway.surfnet_version(),
         "insufficient_rejected_before_signature": true,
         "simulation_failure_signature": sanitize_signature(&failed_simulation_wire.signature),
         "simulation_failure_error": failed_simulation.error,
@@ -192,7 +192,7 @@ fn sanitize_signature(signature: &impl ToString) -> String {
 }
 
 async fn live_context()
--> Result<(Arc<SurfpoolGateway>, Arc<LocalKeypair>, AdapterContext), Box<dyn std::error::Error>> {
+-> Result<(Arc<SolanaGateway>, Arc<LocalKeypair>, AdapterContext), Box<dyn std::error::Error>> {
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let rpc_url =
         std::env::var("COOKER_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8899".to_owned());
@@ -200,8 +200,8 @@ async fn live_context()
         || project_root.join(".surfpool/keys/funder.json"),
         PathBuf::from,
     );
-    let endpoint: SurfpoolRpcUrl = rpc_url.parse()?;
-    let gateway = Arc::new(SurfpoolGateway::connect(endpoint).await?);
+    let endpoint: RpcEndpoint = rpc_url.parse()?;
+    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
     let signer = Arc::new(LocalKeypair::load(&project_root, signer_path)?);
     let context = AdapterContext {
         rpc_url: gateway.endpoint().as_url().clone(),
@@ -233,7 +233,7 @@ fn native_action(destination: Pubkey, lamports: u64) -> PlannedAction {
 }
 
 async fn count_local_signature(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     signature: Signature,
 ) -> Result<usize, CookerError> {
     Ok(gateway
@@ -245,7 +245,7 @@ async fn count_local_signature(
 }
 
 async fn advance_past_block_height(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     target: u64,
 ) -> Result<u64, Box<dyn std::error::Error>> {
     let mut submitted = 0_u64;
@@ -273,7 +273,7 @@ async fn spawn_loss_proxy(
     upstream: &str,
 ) -> Result<
     (
-        SurfpoolRpcUrl,
+        RpcEndpoint,
         mpsc::UnboundedReceiver<Signature>,
         JoinHandle<()>,
     ),
@@ -281,7 +281,7 @@ async fn spawn_loss_proxy(
 > {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
-    let endpoint: SurfpoolRpcUrl = format!("http://{address}").parse()?;
+    let endpoint: RpcEndpoint = format!("http://{address}").parse()?;
     let upstream = upstream.to_owned();
     let client = Client::builder()
         .no_proxy()

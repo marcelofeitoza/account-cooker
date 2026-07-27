@@ -1,4 +1,4 @@
-//! Secure loading for ignored local Surfpool signer files.
+//! Secure loading for signer files in ignored local key directories.
 
 use std::{
     fmt,
@@ -20,16 +20,22 @@ use crate::RpcError;
 
 const MAX_KEYPAIR_FILE_BYTES: u64 = 4_096;
 
-/// Locally loaded signer restricted to `<project>/.surfpool/keys`.
+/// Git-ignored directories a signer file may live in, relative to the project root.
+///
+/// `.surfpool/keys` holds throwaway loopback signers. `.devnet/keys` holds the single funded
+/// payer used by the bounded public devnet run. Both are ignored by Git and created `0700`.
+const KEY_DIRECTORIES: [&str; 2] = [".surfpool/keys", ".devnet/keys"];
+
+/// Locally loaded signer restricted to the git-ignored [`KEY_DIRECTORIES`].
 pub struct LocalKeypair {
     path: PathBuf,
     keypair: Arc<Keypair>,
 }
 
 impl LocalKeypair {
-    /// Generate a new signer with OS entropy in the ignored Surfpool key directory.
+    /// Generate a new signer with OS entropy in an ignored local key directory.
     ///
-    /// The destination must be a direct child of `<project>/.surfpool/keys` and must not already
+    /// The destination must be a direct child of one of [`KEY_DIRECTORIES`] and must not already
     /// exist. The file is created with mode `0600`, synchronized before return, and immediately
     /// reloaded through the same validation path used for existing signers.
     ///
@@ -44,20 +50,7 @@ impl LocalKeypair {
         let root = project_root.as_ref().canonicalize().map_err(|error| {
             RpcError::invalid_input("generateKeypair", format!("invalid project root: {error}"))
         })?;
-        let allowed_dir = root.join(".surfpool/keys");
-        fs::create_dir_all(&allowed_dir).map_err(|error| {
-            RpcError::invalid_input(
-                "generateKeypair",
-                format!("cannot create Surfpool key directory: {error}"),
-            )
-        })?;
-        set_private_directory_permissions(&allowed_dir)?;
-        let allowed_dir = allowed_dir.canonicalize().map_err(|error| {
-            RpcError::invalid_input(
-                "generateKeypair",
-                format!("invalid Surfpool key directory: {error}"),
-            )
-        })?;
+        let allowed_dirs = prepare_key_directories(&root, "generateKeypair")?;
         let requested = if path.as_ref().is_absolute() {
             path.as_ref().to_path_buf()
         } else {
@@ -72,10 +65,20 @@ impl LocalKeypair {
                 format!("invalid keypair parent directory: {error}"),
             )
         })?;
-        if canonical_parent != allowed_dir || requested.file_name().is_none() {
+        let Some(allowed_dir) = allowed_dirs
+            .iter()
+            .find(|candidate| *candidate == &canonical_parent)
+            .cloned()
+        else {
             return Err(RpcError::invalid_input(
                 "generateKeypair",
-                "generated keypair must be a direct child of .surfpool/keys",
+                "generated keypair must be a direct child of .surfpool/keys or .devnet/keys",
+            ));
+        };
+        if requested.file_name().is_none() {
+            return Err(RpcError::invalid_input(
+                "generateKeypair",
+                "generated keypair must be a direct child of .surfpool/keys or .devnet/keys",
             ));
         }
 
@@ -106,25 +109,26 @@ impl LocalKeypair {
         Self::load(&root, &requested)
     }
 
-    /// Load and validate a JSON keypair from the ignored Surfpool key directory.
+    /// Load and validate a JSON keypair from an ignored local key directory.
     ///
     /// # Errors
     ///
-    /// Returns [`RpcError`] when the path escapes `.surfpool/keys`, is a symlink or non-file,
+    /// Returns [`RpcError`] when the path escapes [`KEY_DIRECTORIES`], is a symlink or non-file,
     /// has unsafe Unix permissions, exceeds the size limit, or contains invalid keypair bytes.
     pub fn load(project_root: impl AsRef<Path>, path: impl AsRef<Path>) -> Result<Self, RpcError> {
         let root = project_root.as_ref().canonicalize().map_err(|error| {
             RpcError::invalid_input("loadKeypair", format!("invalid project root: {error}"))
         })?;
-        let allowed_dir = root
-            .join(".surfpool/keys")
-            .canonicalize()
-            .map_err(|error| {
-                RpcError::invalid_input(
-                    "loadKeypair",
-                    format!("Surfpool key directory is unavailable: {error}"),
-                )
-            })?;
+        let allowed_dirs: Vec<PathBuf> = KEY_DIRECTORIES
+            .iter()
+            .filter_map(|relative| root.join(relative).canonicalize().ok())
+            .collect();
+        if allowed_dirs.is_empty() {
+            return Err(RpcError::invalid_input(
+                "loadKeypair",
+                "no local key directory is available",
+            ));
+        }
 
         let link_metadata = fs::symlink_metadata(path.as_ref()).map_err(|error| {
             RpcError::invalid_input("loadKeypair", format!("keypair is unavailable: {error}"))
@@ -139,10 +143,13 @@ impl LocalKeypair {
         let canonical_path = path.as_ref().canonicalize().map_err(|error| {
             RpcError::invalid_input("loadKeypair", format!("invalid keypair path: {error}"))
         })?;
-        if !canonical_path.starts_with(&allowed_dir) {
+        if !allowed_dirs
+            .iter()
+            .any(|allowed| canonical_path.starts_with(allowed))
+        {
             return Err(RpcError::invalid_input(
                 "loadKeypair",
-                "keypair must be stored under .surfpool/keys",
+                "keypair must be stored under .surfpool/keys or .devnet/keys",
             ));
         }
 
@@ -198,6 +205,21 @@ impl LocalKeypair {
             keypair: Arc::new(keypair),
         }
     }
+}
+
+fn prepare_key_directories(root: &Path, method: &'static str) -> Result<Vec<PathBuf>, RpcError> {
+    let mut prepared = Vec::with_capacity(KEY_DIRECTORIES.len());
+    for relative in KEY_DIRECTORIES {
+        let directory = root.join(relative);
+        fs::create_dir_all(&directory).map_err(|error| {
+            RpcError::invalid_input(method, format!("cannot create key directory: {error}"))
+        })?;
+        set_private_directory_permissions(&directory)?;
+        prepared.push(directory.canonicalize().map_err(|error| {
+            RpcError::invalid_input(method, format!("invalid key directory: {error}"))
+        })?);
+    }
+    Ok(prepared)
 }
 
 #[cfg(unix)]
@@ -323,13 +345,37 @@ mod tests {
     }
 
     #[test]
-    fn keypair_outside_surfpool_directory_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    fn keypair_outside_a_key_directory_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
         let (temp, path, _) = write_keypair(0o600)?;
         let outside = temp.path().join("outside.json");
         fs::copy(path, &outside)?;
         #[cfg(unix)]
         fs::set_permissions(&outside, fs::Permissions::from_mode(0o600))?;
         assert!(LocalKeypair::load(temp.path(), outside).is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn devnet_key_directory_is_accepted_with_the_same_guards()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = TempDir::new()?;
+        let path = temp.path().join(".devnet/keys/payer.json");
+        let signer = LocalKeypair::generate(temp.path(), &path)?;
+        assert_eq!(fs::metadata(&path)?.permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            LocalKeypair::load(temp.path(), &path)?.pubkey(),
+            signer.pubkey()
+        );
+        assert!(LocalKeypair::generate(temp.path(), &path).is_err());
+        // A nested path under an allowed directory is still not a direct child.
+        assert!(
+            LocalKeypair::generate(
+                temp.path(),
+                temp.path().join(".devnet/keys/nested/key.json")
+            )
+            .is_err()
+        );
         Ok(())
     }
 

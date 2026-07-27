@@ -1,6 +1,6 @@
 [package]
 name = "cooker-solana"
-description = "Surfpool-only Solana gateway and action adapters"
+description = "Loopback-first Solana gateway, signer boundary, and action adapters"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

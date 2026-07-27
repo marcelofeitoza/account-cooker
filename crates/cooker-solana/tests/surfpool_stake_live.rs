@@ -15,7 +15,7 @@ use cooker_core::{
     ConfirmationStatus, PlannedAction, PreparedAction, RunId, StakeOperation,
 };
 use cooker_solana::{
-    LocalKeypair, NativeStakeAdapter, SurfpoolGateway, SurfpoolRpcUrl, TransactionRecord,
+    LocalKeypair, NativeStakeAdapter, RpcEndpoint, SolanaGateway, TransactionRecord,
 };
 use serde_json::json;
 use solana_pubkey::Pubkey;
@@ -215,7 +215,7 @@ async fn native_stake_full_lifecycle_on_real_surfpool() -> Result<(), Box<dyn st
     let evidence = json!({
         "schema_version": 1,
         "scenario": "native_stake_create_delegate_deactivate_epoch_withdraw",
-        "surfpool_version": gateway.identity().surfnet_version,
+        "surfpool_version": gateway.surfnet_version(),
         "elapsed_ms": u64::try_from(started.elapsed().as_millis())?,
         "payer": payer.to_string(),
         "vote_account": vote.to_string(),
@@ -321,7 +321,7 @@ fn sanitize_signature(signature: &impl ToString) -> String {
 
 async fn live_context() -> Result<
     (
-        Arc<SurfpoolGateway>,
+        Arc<SolanaGateway>,
         Arc<LocalKeypair>,
         PathBuf,
         AdapterContext,
@@ -335,8 +335,8 @@ async fn live_context() -> Result<
         || project_root.join(".surfpool/keys/funder.json"),
         PathBuf::from,
     );
-    let endpoint: SurfpoolRpcUrl = rpc_url.parse()?;
-    let gateway = Arc::new(SurfpoolGateway::connect(endpoint).await?);
+    let endpoint: RpcEndpoint = rpc_url.parse()?;
+    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
     let signer = Arc::new(LocalKeypair::load(&project_root, &signer_path)?);
     let context = AdapterContext {
         rpc_url: gateway.endpoint().as_url().clone(),
@@ -401,7 +401,7 @@ fn create_local_vote_account(
 }
 
 async fn execute(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     adapter: &NativeStakeAdapter,
     context: &AdapterContext,
     action: &PlannedAction,

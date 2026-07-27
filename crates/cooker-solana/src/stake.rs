@@ -18,8 +18,8 @@ use solana_transaction::Transaction;
 use tokio::time::{Instant, sleep};
 
 use crate::{
-    AccountInfo, LocalKeypair, SignedWireTransaction, SurfpoolGateway, SurfpoolRpcUrl,
-    TransactionRecord, build_signed_transaction,
+    AccountInfo, LocalKeypair, SignedWireTransaction, SolanaGateway, TransactionRecord,
+    build_signed_transaction,
 };
 
 const OBSERVATION_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -31,7 +31,7 @@ const STAKE_SEED_PREFIX: &str = "cooker-stake-";
 /// Adapter for create/delegate, deactivate, and withdraw of native stake on Surfpool.
 #[derive(Clone, Debug)]
 pub struct NativeStakeAdapter {
-    gateway: Arc<SurfpoolGateway>,
+    gateway: Arc<SolanaGateway>,
     signer: Arc<LocalKeypair>,
     vote_account: Pubkey,
 }
@@ -40,7 +40,7 @@ impl NativeStakeAdapter {
     /// Create a native stake adapter pinned to one allowlisted validator vote account.
     #[must_use]
     pub const fn new(
-        gateway: Arc<SurfpoolGateway>,
+        gateway: Arc<SolanaGateway>,
         signer: Arc<LocalKeypair>,
         vote_account: Pubkey,
     ) -> Self {
@@ -610,13 +610,12 @@ fn require_zero_lifecycle_lamports(
 
 fn validate_context(
     context: &AdapterContext,
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     signer: &LocalKeypair,
 ) -> Result<(), CookerError> {
-    let endpoint = SurfpoolRpcUrl::new(context.rpc_url.clone())?;
-    if &endpoint != gateway.endpoint() {
+    if &context.rpc_url != gateway.endpoint().as_url() {
         return Err(CookerError::InvalidConfig(
-            "adapter context RPC differs from the verified Surfpool gateway".to_owned(),
+            "adapter context RPC differs from the verified gateway endpoint".to_owned(),
         ));
     }
     let context_signer = Pubkey::from_str(&context.signer).map_err(|error| {
@@ -657,7 +656,7 @@ fn validate_prepared(
 }
 
 async fn observe_until_terminal(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     context: &AdapterContext,
     prepared: &PreparedAction,
 ) -> Result<ChainReceipt, CookerError> {
@@ -688,7 +687,7 @@ async fn observe_until_terminal(
 }
 
 async fn confirmed_record(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     prepared: &PreparedAction,
 ) -> Result<TransactionRecord, CookerError> {
     let signature = Signature::from_str(&prepared.signature)

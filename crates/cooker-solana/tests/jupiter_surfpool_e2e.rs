@@ -9,7 +9,7 @@ use cooker_core::{
 };
 use cooker_solana::{
     JupiterAdapter, JupiterApiClient, JupiterInstruction, JupiterPolicy, JupiterQuote,
-    JupiterSwapInstructions, LocalKeypair, SurfpoolGateway, SurfpoolRpcUrl,
+    JupiterSwapInstructions, LocalKeypair, RpcEndpoint, SolanaGateway,
 };
 use solana_pubkey::Pubkey;
 use spl_associated_token_account_interface::address::get_associated_token_address;
@@ -79,8 +79,8 @@ async fn jupiter_exact_input_swap_accepts_on_real_surfpool()
         DEFAULT_WRITABLE_ACCOUNTS,
     )?);
 
-    let endpoint: SurfpoolRpcUrl = rpc_url.parse()?;
-    let gateway = Arc::new(SurfpoolGateway::connect(endpoint).await?);
+    let endpoint: RpcEndpoint = rpc_url.parse()?;
+    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
     let signer = Arc::new(LocalKeypair::load(&project_root, signer_path)?);
     let api = Arc::new(JupiterApiClient::new(env::var("JUPITER_API_KEY").ok())?);
     let adapter = JupiterAdapter::new(Arc::clone(&gateway), Arc::clone(&signer), api, policy);
@@ -178,7 +178,7 @@ async fn jupiter_exact_input_swap_accepts_on_real_surfpool()
     let evidence = serde_json::json!({
         "schema_version": 1,
         "adapter": "jupiter_exact_input_swap",
-        "surfpool_version": &gateway.identity().surfnet_version,
+        "surfpool_version": gateway.surfnet_version(),
         "plan_source": plan_source,
         "signature": sanitize_signature(&receipt.signature),
         "slot": receipt.slot,

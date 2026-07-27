@@ -37,12 +37,12 @@ pub struct Cli {
 /// Supported offline and Surfpool-only commands.
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
-    /// Generate one non-overwriting, permission-checked local Surfpool keypair.
+    /// Generate one non-overwriting, permission-checked local keypair.
     Keygen {
-        /// Project root containing the ignored `.surfpool/keys` directory.
+        /// Project root containing the ignored `.surfpool/keys` and `.devnet/keys` directories.
         #[arg(long, default_value = ".")]
         project_root: PathBuf,
-        /// Destination under `.surfpool/keys`.
+        /// Destination under `.surfpool/keys` or `.devnet/keys`.
         #[arg(short, long, default_value = ".surfpool/keys/funder.json")]
         output: PathBuf,
     },

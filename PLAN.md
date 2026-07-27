@@ -43,10 +43,13 @@ The following decisions are fixed for the complete deliverable:
 - Language: Rust end to end.
 - License: MIT.
 - Identity: independent personal contribution.
-- Development chain: Surfpool only.
-- Upstream writes: development never submits to devnet or mainnet.
+- Development chain: Surfpool for all development and all canonical evidence.
+- Upstream writes: never mainnet. One opt-in bounded devnet run exists to answer whether the
+  engine holds on public-network topology; it is declared in source, excluded from the
+  canonical run and from CI, and recorded separately in `evidence/devnet`.
 - Source: standalone clean-room implementation from the bounty specification and public
-  APIs, with no code, fixture, service, key, data, or runtime dependency on Cloak.
+  APIs, with no code, fixture, service, key, data, or runtime dependency on any private
+  project.
 - Runtime default: dry-run, followed by an explicit Surfpool execution mode.
 - Claim policy: no anonymity or indistinguishability claim without evaluator evidence.
 - Safety policy: no wash trading, self-trading, governance voting, referral farming,
@@ -106,7 +109,9 @@ These are possible follow-on projects, not completion gates and not implied capa
 
 ### Explicit non-goals
 
-- Mainnet or devnet bot execution.
+- Mainnet execution of any kind.
+- Unattended or continuous devnet bot operation. The one devnet run is a bounded,
+  hand-started measurement, not a deployed workload.
 - Hiding or laundering a common funding source.
 - A ZK pool, mixer, relay, or external privacy-protocol integration.
 - Cross-host consensus or a distributed database.
@@ -383,9 +388,10 @@ Otherwise the report says that no supported improvement was established.
 ## 13. Surfpool Development Contract
 
 The interactive default RPC endpoint is http://127.0.0.1:8899; isolated acceptance and
-full-demo runs default to port 18899. Code rejects non-loopback Solana RPC URLs and then
-requires the exact pinned Surfpool identity. The workflow is documented in
-docs/SURFPOOL.md.
+full-demo runs default to port 18899. Code rejects non-loopback Solana RPC URLs supplied as
+configuration and then requires the exact pinned Surfpool identity. The one public-cluster
+constructor is unreachable from configuration and proves a pinned genesis hash instead. The
+workflow is documented in docs/SURFPOOL.md, and the public-network run in docs/DEVNET.md.
 
 The chain-acceptance script executes six ordered groups on fresh isolated state:
 

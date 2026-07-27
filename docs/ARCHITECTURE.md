@@ -5,8 +5,8 @@ clean-clone verifications are complete. The pull request remains draft for Marce
 human review and submission decision.
 
 This repository is a standalone clean-room implementation. It has no source, fixture,
-service, key, data, or runtime dependency on Cloak; anything conceptually similar was
-implemented inside this workspace from public interfaces.
+service, key, data, or runtime dependency on any private project; anything conceptually
+similar was implemented inside this workspace from public interfaces.
 
 ## 1. System Shape
 
@@ -85,8 +85,9 @@ without pretending SQLite provides cross-host coordination.
 
 Owns all Solana-specific behavior:
 
-- SurfpoolRpcUrl validated type.
-- Surfpool identity and health probes.
+- RpcEndpoint validated type, loopback by default and public-cluster only by explicit
+  in-source declaration.
+- Surfpool and public-cluster identity and health probes.
 - Solana JSON-RPC transport and confirmation polling.
 - SignerProvider and local ephemeral signer.
 - Blockhash, transaction, fee, simulation, submission, confirmation, observation.
@@ -329,7 +330,7 @@ A later layer cannot override a rejection from an earlier safety layer.
 
 ## 11. Chain Gateway
 
-The gateway is constructed only after:
+The default gateway is constructed only after:
 
 - RPC and WebSocket URLs parse as loopback;
 - getVersion returns surfnet-version;
@@ -338,6 +339,21 @@ The gateway is constructed only after:
 - the configured genesis/network identity matches persisted run state.
 
 Only then may the runtime load signer references or claim work.
+
+A second constructor, `SolanaGateway::connect_public_cluster`, addresses a named public
+Solana cluster and is the only path that leaves loopback. It requires an `RpcEndpoint` built
+from a `PublicCluster` value written in Rust source, and it proves that cluster's pinned
+genesis hash before returning, so a signer is still never loaded against an unverified
+network. Configuration cannot reach it: `RpcEndpoint`'s `FromStr` and `TryFrom<Url>`
+implementations, which are the only paths a parsed config or environment variable can use,
+still accept explicit loopback IPs exclusively, and the `cooker` CLI never constructs a
+public endpoint. It is used by the bounded devnet soak documented in
+[the devnet run and topology delta](DEVNET.md).
+
+Against a public cluster the same gateway also paces itself under the endpoint's published
+request, per-method, and connection ceilings, and retries transient read failures with
+bounded exponential backoff. `sendTransaction` is never retried; a failed send stays an
+ambiguous outcome that only signature reconciliation may settle.
 
 All blockhashes, account reads, simulations, sends, signature status, and transaction
 receipts use this gateway. Off-chain quote APIs may be contacted through adapter-specific
@@ -431,8 +447,9 @@ deliverable.
 - Coordination and durability are single-host: one controller, local signer files, and
   one SQLite WAL database. The worker bound scales local concurrency; it is not a
   distributed execution claim.
-- All chain execution is local Surfpool. The harness does not test public-network
-  inclusion or protect RPC/IP metadata.
+- Acceptance-scale chain execution is local Surfpool. One bounded public devnet run tests
+  public-network inclusion and durability; see [the devnet run and topology delta](DEVNET.md)
+  for what it does and does not establish. Neither harness protects RPC/IP metadata.
 - The Jupiter fixture is an offline snapshot captured from a lazy fork at slot `433717382`;
   it proves the reviewed route and signer-rebinding contract, not current market state.
 - Evaluator inputs and ownership labels are synthetic known ground truth. They validate

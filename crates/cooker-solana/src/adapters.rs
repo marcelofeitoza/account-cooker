@@ -21,11 +21,17 @@ use spl_token_interface::{
 use tokio::time::{Instant, sleep};
 
 use crate::{
-    AccountInfo, LocalKeypair, SignedWireTransaction, SurfpoolGateway, SurfpoolRpcUrl,
-    build_signed_transaction,
+    AccountInfo, LocalKeypair, SignedWireTransaction, SolanaGateway, build_signed_transaction,
 };
 
 const OBSERVATION_POLL_INTERVAL: Duration = Duration::from_millis(200);
+/// Confirmation polling interval for a shared public endpoint.
+///
+/// A public cluster produces a block roughly every 400 ms and publishes a per-method request
+/// ceiling, so a 200 ms poll would spend the whole budget on status reads that cannot yet have
+/// changed. Status polling is the single largest consumer of that budget across a fleet, so
+/// this is set well above block time.
+const PUBLIC_CLUSTER_OBSERVATION_POLL_INTERVAL: Duration = Duration::from_millis(2_500);
 const NATIVE_DESTINATION_KIND: &str = "native_destination_balance_delta";
 const NATIVE_SOURCE_KIND: &str = "native_source_balance_delta";
 const SPL_DESTINATION_KIND: &str = "spl_destination_balance_delta";
@@ -33,17 +39,17 @@ const SPL_NATIVE_OVERHEAD_KIND: &str = "spl_payer_native_overhead";
 const SPL_SOURCE_KIND: &str = "spl_source_balance_delta";
 const SPL_TRANSACTION_METADATA_KIND: &str = "spl_transaction_token_metadata";
 
-/// Adapter that builds one-signer native SOL transfers for verified Surfpool.
+/// Adapter that builds one-signer native SOL transfers for an identity-verified gateway.
 #[derive(Clone, Debug)]
 pub struct NativeTransferAdapter {
-    gateway: Arc<SurfpoolGateway>,
+    gateway: Arc<SolanaGateway>,
     signer: Arc<LocalKeypair>,
 }
 
 impl NativeTransferAdapter {
     /// Create an adapter from an already identity-verified gateway and local signer.
     #[must_use]
-    pub const fn new(gateway: Arc<SurfpoolGateway>, signer: Arc<LocalKeypair>) -> Self {
+    pub const fn new(gateway: Arc<SolanaGateway>, signer: Arc<LocalKeypair>) -> Self {
         Self { gateway, signer }
     }
 }
@@ -51,14 +57,14 @@ impl NativeTransferAdapter {
 /// Adapter that builds classic SPL Token transfers between associated accounts.
 #[derive(Clone, Debug)]
 pub struct SplTransferAdapter {
-    gateway: Arc<SurfpoolGateway>,
+    gateway: Arc<SolanaGateway>,
     signer: Arc<LocalKeypair>,
 }
 
 impl SplTransferAdapter {
     /// Create an adapter from an already identity-verified gateway and local signer.
     #[must_use]
-    pub const fn new(gateway: Arc<SurfpoolGateway>, signer: Arc<LocalKeypair>) -> Self {
+    pub const fn new(gateway: Arc<SolanaGateway>, signer: Arc<LocalKeypair>) -> Self {
         Self { gateway, signer }
     }
 }
@@ -475,13 +481,12 @@ impl ActionAdapter for SplTransferAdapter {
 
 fn validate_context(
     context: &AdapterContext,
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     signer: &LocalKeypair,
 ) -> Result<(), CookerError> {
-    let endpoint = SurfpoolRpcUrl::new(context.rpc_url.clone())?;
-    if &endpoint != gateway.endpoint() {
+    if &context.rpc_url != gateway.endpoint().as_url() {
         return Err(CookerError::InvalidConfig(
-            "adapter context RPC differs from the verified Surfpool gateway".to_owned(),
+            "adapter context RPC differs from the verified gateway endpoint".to_owned(),
         ));
     }
     let context_signer = Pubkey::from_str(&context.signer).map_err(|error| {
@@ -522,11 +527,16 @@ fn validate_prepared(
 }
 
 async fn observe_until_terminal(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     context: &AdapterContext,
     prepared: &PreparedAction,
 ) -> Result<ChainReceipt, CookerError> {
     let started = Instant::now();
+    let poll_interval = if gateway.endpoint().is_public_cluster() {
+        PUBLIC_CLUSTER_OBSERVATION_POLL_INTERVAL
+    } else {
+        OBSERVATION_POLL_INTERVAL
+    };
     loop {
         let receipt =
             ChainGateway::observe(gateway, &prepared.action_id, &prepared.signature).await?;
@@ -547,13 +557,12 @@ async fn observe_until_terminal(
         if elapsed >= context.confirmation_timeout {
             return Ok(receipt);
         }
-        sleep(OBSERVATION_POLL_INTERVAL.min(context.confirmation_timeout.saturating_sub(elapsed)))
-            .await;
+        sleep(poll_interval.min(context.confirmation_timeout.saturating_sub(elapsed))).await;
     }
 }
 
 async fn confirmed_record(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     prepared: &PreparedAction,
 ) -> Result<crate::TransactionRecord, CookerError> {
     let signature = Signature::from_str(&prepared.signature)
@@ -585,7 +594,7 @@ fn transaction_native_balances(
 }
 
 async fn required_account(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     address: &Pubkey,
     label: &str,
 ) -> Result<AccountInfo, CookerError> {

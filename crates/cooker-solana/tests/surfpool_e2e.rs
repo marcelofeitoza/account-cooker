@@ -8,8 +8,8 @@ use cooker_core::{
     ConfirmationStatus, CookerError, PlannedAction, RunId,
 };
 use cooker_solana::{
-    LocalKeypair, NativeTransferAdapter, SignedWireTransaction, SplTransferAdapter,
-    SurfpoolGateway, SurfpoolRpcUrl, TransactionRecord, build_signed_transaction,
+    LocalKeypair, NativeTransferAdapter, RpcEndpoint, SignedWireTransaction, SolanaGateway,
+    SplTransferAdapter, TransactionRecord, build_signed_transaction,
     build_signed_transaction_with_signers,
 };
 use solana_instruction::Instruction;
@@ -91,7 +91,7 @@ async fn native_adapter_accepts_on_real_surfpool() -> Result<(), Box<dyn std::er
     let evidence = serde_json::json!({
         "schema_version": 1,
         "adapter": "native_transfer",
-        "surfpool_version": &gateway.identity().surfnet_version,
+        "surfpool_version": gateway.surfnet_version(),
         "signature": sanitize_signature(&receipt.signature),
         "slot": receipt.slot,
         "source": local_signer.pubkey().to_string(),
@@ -267,7 +267,7 @@ async fn spl_adapter_accepts_created_mint_on_real_surfpool()
 }
 
 async fn live_resources()
--> Result<(Arc<SurfpoolGateway>, Arc<LocalKeypair>), Box<dyn std::error::Error>> {
+-> Result<(Arc<SolanaGateway>, Arc<LocalKeypair>), Box<dyn std::error::Error>> {
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let rpc_url =
         std::env::var("COOKER_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8899".to_owned());
@@ -275,14 +275,14 @@ async fn live_resources()
         || project_root.join(".surfpool/keys/funder.json"),
         PathBuf::from,
     );
-    let endpoint: SurfpoolRpcUrl = rpc_url.parse()?;
-    let gateway = Arc::new(SurfpoolGateway::connect(endpoint).await?);
+    let endpoint: RpcEndpoint = rpc_url.parse()?;
+    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
     let local_signer = Arc::new(LocalKeypair::load(&project_root, signer_path)?);
     Ok((gateway, local_signer))
 }
 
 async fn signed_setup_transaction(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     payer: &LocalKeypair,
     instructions: &[Instruction],
     additional_signers: &[&dyn Signer],
@@ -304,7 +304,7 @@ async fn signed_setup_transaction(
 }
 
 async fn submit_confirmed(
-    gateway: &SurfpoolGateway,
+    gateway: &SolanaGateway,
     signed: &SignedWireTransaction,
 ) -> Result<TransactionRecord, CookerError> {
     let submitted = gateway.submit(&signed.bytes).await?;
