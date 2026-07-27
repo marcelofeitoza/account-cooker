@@ -1,5 +1,7 @@
 //! Account Cooker command-line entry point.
 
+#![forbid(unsafe_code)]
+
 use std::io;
 
 use clap::Parser;

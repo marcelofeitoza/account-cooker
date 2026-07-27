@@ -1,5 +1,7 @@
 //! Surfpool identity guard, JSON-RPC gateway, local signing, and action adapters.
 
+#![forbid(unsafe_code)]
+
 mod adapters;
 mod error;
 mod fleet;

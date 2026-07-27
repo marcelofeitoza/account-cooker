@@ -1,5 +1,7 @@
 //! Adversarial measurement for observation-only account traces.
 
+#![forbid(unsafe_code)]
+
 mod attacks;
 mod dataset;
 mod experiment;

@@ -1,5 +1,6 @@
 //! Domain model and side-effect boundaries for the cooker runtime.
 
+#![forbid(unsafe_code)]
 #![allow(
     clippy::missing_errors_doc,
     reason = "all fallible domain APIs return the documented CookerError taxonomy"

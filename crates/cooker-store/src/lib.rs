@@ -4,6 +4,8 @@
 //! `BEGIN IMMEDIATE` transactions for claims and compare-and-swap updates.
 //! Separate `Store` instances may safely coordinate through the same WAL file.
 
+#![forbid(unsafe_code)]
+
 mod migration;
 mod models;
 mod store;

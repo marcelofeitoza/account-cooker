@@ -1,5 +1,6 @@
 //! Offline-first command-line interface for deterministic planning and evaluation.
 
+#![forbid(unsafe_code)]
 #![allow(
     clippy::missing_errors_doc,
     reason = "all CLI failures carry command and path context through anyhow"

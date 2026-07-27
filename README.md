@@ -61,6 +61,14 @@ The pinned environment is:
 - `bash`, `curl`, `gzip`, `jq`, `lsof`, and `shellcheck`;
 - `cargo-audit 0.22.1`, `cargo-deny 0.20.2`, and Gitleaks `8.30.1` for the complete gate.
 
+Two safety postures are declared where a reviewer can see them in one file. Every crate
+root carries an explicit `#![forbid(unsafe_code)]` on top of the workspace-wide
+`unsafe_code = "forbid"` lint, and the RustSec advisory policy is checked in at
+[`.cargo/audit.toml`](.cargo/audit.toml), which denies unmaintained, unsound, and yanked
+dependencies and records a reason for each accepted exception. `cargo audit` reads that
+file directly, and `./scripts/check-lint-policy.sh` fails if either posture is dropped.
+Both run in CI. See [validation and evidence gates](docs/VALIDATION.md).
+
 The harness starts Surfpool offline from that pinned snapshot with instruction profiling
 disabled. Remote account misses and profiling are not part of the acceptance claim and
 would otherwise add external rate limits or unrelated resource work to sustained execution.

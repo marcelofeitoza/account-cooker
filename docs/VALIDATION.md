@@ -9,6 +9,7 @@ focused runs cannot be cited as canonical results.
 The draft PR remains draft until these pass from a clean checkout:
 
     cargo fmt --all -- --check
+    ./scripts/check-lint-policy.sh
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
     cargo test --locked --workspace --all-features
     cargo test --locked --workspace --doc
@@ -23,6 +24,17 @@ The draft PR remains draft until these pass from a clean checkout:
 
 `scripts/full-demo.sh` is the executable superset. Its default mode requires a clean tree;
 `--quick` exists only to rehearse the harness at reduced dimensions.
+
+`scripts/check-lint-policy.sh` is the machine-checkable form of two declared postures. It
+fails if any workspace crate root drops its explicit `#![forbid(unsafe_code)]`, if a crate
+stops inheriting the workspace lint table, if the workspace lint itself stops forbidding
+unsafe code, or if `.cargo/audit.toml` stops denying advisory warnings. `cargo audit` reads
+that same `.cargo/audit.toml`, so an unmaintained, unsound, or yanked dependency now fails
+the gate instead of printing a warning; each accepted exception is listed there with a
+reason and mirrors `deny.toml`. Both checks run in CI.
+
+The committed `evidence/final` pack predates this gate. Its `quality-gates.json` therefore
+has no `lint_policy` key, while a fresh canonical run emits one.
 
 ## 2. Test Layers
 

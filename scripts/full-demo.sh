@@ -225,6 +225,8 @@ export CARGO_TERM_COLOR=never
 
 run_capture "Rust formatting" "${output_dir}/quality/fmt.log" \
   cargo fmt --all -- --check
+run_capture "Lint and advisory policy" "${output_dir}/quality/lint-policy.log" \
+  "${SCRIPT_DIR}/check-lint-policy.sh"
 run_capture "Workspace clippy" "${output_dir}/quality/clippy.log" \
   cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 run_capture "Workspace tests" "${output_dir}/quality/tests.log" \
@@ -251,6 +253,7 @@ run_capture "Release build" "${output_dir}/quality/release-build.log" \
 jq -n '{
   schema_version: 1,
   formatting: true,
+  lint_policy: true,
   clippy: true,
   workspace_tests: true,
   documentation_tests: true,

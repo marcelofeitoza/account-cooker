@@ -31,6 +31,8 @@ jobs:
         run: cargo metadata --locked --format-version 1 --no-deps >/dev/null
       - name: Check formatting
         run: cargo fmt --all -- --check
+      - name: Check declared lint and advisory policy
+        run: bash scripts/check-lint-policy.sh
       - name: Run strict Clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Run workspace tests
@@ -80,7 +82,7 @@ jobs:
           mkdir -p "$bindir"
           tar --extract --gzip --file "$archive" --directory "$bindir" gitleaks
           printf '%s\n' "$bindir" >>"$GITHUB_PATH"
-      - name: Audit RustSec advisories
+      - name: Audit RustSec advisories under .cargo/audit.toml
         run: cargo audit
       - name: Enforce dependency policy
         run: cargo deny check --hide-inclusion-graph

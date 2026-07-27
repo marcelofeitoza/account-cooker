@@ -1,5 +1,7 @@
 //! Bounded orchestration, fault injection, and restart reconciliation.
 
+#![forbid(unsafe_code)]
+
 mod engine;
 mod fault;
 mod fleet;

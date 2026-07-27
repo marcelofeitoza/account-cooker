@@ -1,0 +1,31 @@
+# RustSec advisory policy for `cargo audit`.
+#
+# `cargo audit` reads `.cargo/audit.toml` from the working directory, so CI and a
+# local run share this policy without repeating flags in the workflow. The
+# advisory posture is therefore a reviewable, checked-in artifact.
+#
+# Policy: any vulnerability fails the build, and so does any unmaintained,
+# unsound, or yanked dependency. Exceptions are listed below with a reason and
+# mirror the `[advisories].ignore` list in `deny.toml`.
+
+[advisories]
+ignore = [
+  # bincode 1.3.3 reaches the workspace only through Solana interface crates.
+  # The advisory is informational (unmaintained). It names no vulnerability and
+  # has no patched release, so there is nothing to upgrade to. Revisit when the
+  # Solana interface crates move off bincode 1.x.
+  "RUSTSEC-2025-0141",
+]
+informational_warnings = ["unmaintained", "unsound", "notice"]
+severity_threshold = "none"
+
+[output]
+deny = ["warnings", "unmaintained", "unsound", "yanked"]
+format = "terminal"
+quiet = false
+
+[yanked]
+# Keep the crates.io index refresh on: denying yanked crates is only meaningful
+# when the yanked set is current.
+enabled = true
+update_index = true
