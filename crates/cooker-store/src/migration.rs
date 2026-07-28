@@ -117,28 +117,7 @@ pub(crate) fn verify_current(
         )));
     }
 
-    let mut applied = BTreeMap::new();
-    let mut statement = connection
-        .prepare("SELECT version, name, checksum FROM schema_migrations ORDER BY version")
-        .map_err(|error| sqlite_error("prepare read-only migration journal query", error))?;
-    let mut rows = statement
-        .query([])
-        .map_err(|error| sqlite_error("query read-only migration journal", error))?;
-    while let Some(row) = rows
-        .next()
-        .map_err(|error| sqlite_error("read migration journal", error))?
-    {
-        let version: u32 = row
-            .get(0)
-            .map_err(|error| sqlite_error("decode migration version", error))?;
-        let name: String = row
-            .get(1)
-            .map_err(|error| sqlite_error("decode migration name", error))?;
-        let checksum: String = row
-            .get(2)
-            .map_err(|error| sqlite_error("decode migration checksum", error))?;
-        applied.insert(version, (name, checksum));
-    }
+    let applied = read_migration_journal(connection)?;
     if applied.len() != MIGRATIONS.len() {
         return Err(CookerError::Store(
             "database migration journal is incomplete or contains unknown entries".to_owned(),
@@ -212,30 +191,7 @@ pub(crate) fn initialize(
         )
         .map_err(|error| sqlite_error("create migration journal", error))?;
 
-    let mut applied = BTreeMap::new();
-    {
-        let mut statement = transaction
-            .prepare("SELECT version, name, checksum FROM schema_migrations ORDER BY version")
-            .map_err(|error| sqlite_error("prepare migration journal query", error))?;
-        let mut rows = statement
-            .query([])
-            .map_err(|error| sqlite_error("query migration journal", error))?;
-        while let Some(row) = rows
-            .next()
-            .map_err(|error| sqlite_error("read migration journal", error))?
-        {
-            let version: u32 = row
-                .get(0)
-                .map_err(|error| sqlite_error("decode migration version", error))?;
-            let name: String = row
-                .get(1)
-                .map_err(|error| sqlite_error("decode migration name", error))?;
-            let checksum: String = row
-                .get(2)
-                .map_err(|error| sqlite_error("decode migration checksum", error))?;
-            applied.insert(version, (name, checksum));
-        }
-    }
+    let applied = read_migration_journal(&transaction)?;
 
     if applied.keys().any(|version| {
         MIGRATIONS
@@ -321,6 +277,35 @@ pub(crate) fn initialize(
         .map_err(|error| sqlite_error("commit migrations", error))?;
     verify(connection)?;
     Ok(database_id)
+}
+
+/// Read the recorded migration journal as version to (name, checksum).
+fn read_migration_journal(
+    connection: &Connection,
+) -> Result<BTreeMap<u32, (String, String)>, CookerError> {
+    let mut applied = BTreeMap::new();
+    let mut statement = connection
+        .prepare("SELECT version, name, checksum FROM schema_migrations ORDER BY version")
+        .map_err(|error| sqlite_error("prepare migration journal query", error))?;
+    let mut rows = statement
+        .query([])
+        .map_err(|error| sqlite_error("query migration journal", error))?;
+    while let Some(row) = rows
+        .next()
+        .map_err(|error| sqlite_error("read migration journal", error))?
+    {
+        let version: u32 = row
+            .get(0)
+            .map_err(|error| sqlite_error("decode migration version", error))?;
+        let name: String = row
+            .get(1)
+            .map_err(|error| sqlite_error("decode migration name", error))?;
+        let checksum: String = row
+            .get(2)
+            .map_err(|error| sqlite_error("decode migration checksum", error))?;
+        applied.insert(version, (name, checksum));
+    }
+    Ok(applied)
 }
 
 fn establish_application_identity(connection: &Connection) -> Result<(), CookerError> {

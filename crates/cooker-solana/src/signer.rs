@@ -2,21 +2,23 @@
 
 use std::{
     fmt,
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
-
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use zeroize::Zeroize;
 
-use crate::RpcError;
+use crate::{
+    RpcError,
+    private_fs::{
+        open_private_new, secure_directory, sync_directory, validate_private_permissions,
+    },
+};
 
 const MAX_KEYPAIR_FILE_BYTES: u64 = 4_096;
 
@@ -90,22 +92,23 @@ impl LocalKeypair {
                     format!("cannot serialize keypair: {error}"),
                 )
             })?;
-        let write_result = (|| -> Result<(), std::io::Error> {
-            let mut file = open_private_new(&requested)?;
-            file.write_all(&serialized)?;
-            file.write_all(b"\n")?;
-            file.sync_all()?;
-            Ok(())
-        })();
+        let write_result = open_private_new(&requested, "generateKeypair").and_then(|mut file| {
+            file.write_all(&serialized)
+                .and_then(|()| file.write_all(b"\n"))
+                .and_then(|()| file.sync_all())
+                .map_err(|error| {
+                    RpcError::invalid_input(
+                        "generateKeypair",
+                        format!("cannot create keypair: {error}"),
+                    )
+                })
+        });
         serialized.zeroize();
         if let Err(error) = write_result {
             let _ = fs::remove_file(&requested);
-            return Err(RpcError::invalid_input(
-                "generateKeypair",
-                format!("cannot create keypair: {error}"),
-            ));
+            return Err(error);
         }
-        sync_directory(&allowed_dir)?;
+        sync_directory(&allowed_dir, "generateKeypair")?;
         Self::load(&root, &requested)
     }
 
@@ -165,7 +168,7 @@ impl LocalKeypair {
                 "keypair file size is invalid",
             ));
         }
-        validate_permissions(&metadata)?;
+        validate_private_permissions(&metadata, "loadKeypair")?;
 
         let mut bytes: Vec<u8> = serde_json::from_reader(file).map_err(|error| {
             RpcError::invalid_input("loadKeypair", format!("invalid keypair JSON: {error}"))
@@ -214,58 +217,12 @@ fn prepare_key_directories(root: &Path, method: &'static str) -> Result<Vec<Path
         fs::create_dir_all(&directory).map_err(|error| {
             RpcError::invalid_input(method, format!("cannot create key directory: {error}"))
         })?;
-        set_private_directory_permissions(&directory)?;
+        secure_directory(&directory, "generateKeypair")?;
         prepared.push(directory.canonicalize().map_err(|error| {
             RpcError::invalid_input(method, format!("invalid key directory: {error}"))
         })?);
     }
     Ok(prepared)
-}
-
-#[cfg(unix)]
-fn open_private_new(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-}
-
-#[cfg(not(unix))]
-fn open_private_new(_path: &Path) -> std::io::Result<File> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "secure keypair creation requires Unix",
-    ))
-}
-
-#[cfg(unix)]
-fn set_private_directory_permissions(path: &Path) -> Result<(), RpcError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|error| {
-        RpcError::invalid_input(
-            "generateKeypair",
-            format!("cannot secure key directory: {error}"),
-        )
-    })
-}
-
-#[cfg(not(unix))]
-fn set_private_directory_permissions(_path: &Path) -> Result<(), RpcError> {
-    Err(RpcError::invalid_input(
-        "generateKeypair",
-        "secure keypair creation requires Unix",
-    ))
-}
-
-fn sync_directory(path: &Path) -> Result<(), RpcError> {
-    File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| {
-            RpcError::invalid_input(
-                "generateKeypair",
-                format!("cannot synchronize key directory: {error}"),
-            )
-        })
 }
 
 impl fmt::Debug for LocalKeypair {
@@ -278,29 +235,12 @@ impl fmt::Debug for LocalKeypair {
     }
 }
 
-#[cfg(unix)]
-fn validate_permissions(metadata: &fs::Metadata) -> Result<(), RpcError> {
-    let mode = metadata.permissions().mode();
-    if mode & 0o077 != 0 {
-        return Err(RpcError::invalid_input(
-            "loadKeypair",
-            "keypair permissions must deny group and other access",
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn validate_permissions(_metadata: &fs::Metadata) -> Result<(), RpcError> {
-    Err(RpcError::invalid_input(
-        "loadKeypair",
-        "secure keypair permission validation requires Unix",
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     use tempfile::TempDir;
 

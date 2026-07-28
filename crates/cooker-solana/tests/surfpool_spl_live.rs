@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 use std::{
-    fs, io,
+    io,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -12,11 +12,11 @@ use std::{
 
 use chrono::Utc;
 use cooker_core::{
-    ActionAdapter, ActionId, ActionPayload, AdapterContext, AgentId, ChainGateway,
-    ConfirmationStatus, PlannedAction, RunId,
+    ActionAdapter, ActionId, ActionPayload, AgentId, ChainGateway, ConfirmationStatus,
+    PlannedAction, RunId,
 };
 use cooker_solana::{
-    LocalKeypair, RpcEndpoint, SolanaGateway, SplTransferAdapter, build_signed_transaction,
+    SolanaGateway, SplTransferAdapter, build_signed_transaction,
     build_signed_transaction_with_signers,
 };
 use serde_json::json;
@@ -35,6 +35,10 @@ use spl_token_interface::{
 };
 use tokio::time::{Instant, sleep};
 
+mod common;
+
+use common::{live_context_in, sanitize_signature, write_json};
+
 const DECIMALS: u8 = 6;
 const MINTED_AMOUNT: u64 = 5_000_000;
 const TRANSFER_AMOUNT: u64 = 1_234_567;
@@ -47,7 +51,8 @@ async fn classic_spl_adapter_proves_creation_transfer_and_exact_overhead()
 -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let (gateway, signer, context) = live_context(&project_root).await?;
+    let live = live_context_in(project_root.clone()).await?;
+    let (gateway, signer, context) = (live.gateway, live.signer, live.context);
     let token_program = spl_token_interface::id();
     let mint_keypair = Keypair::new();
     let mint = mint_keypair.pubkey();
@@ -308,26 +313,6 @@ async fn classic_spl_adapter_proves_creation_transfer_and_exact_overhead()
     Ok(())
 }
 
-async fn live_context(
-    project_root: &Path,
-) -> Result<(Arc<SolanaGateway>, Arc<LocalKeypair>, AdapterContext), Box<dyn std::error::Error>> {
-    let rpc_url =
-        std::env::var("COOKER_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8899".to_owned());
-    let signer_path = std::env::var_os("COOKER_SIGNER_PATH").map_or_else(
-        || project_root.join(".surfpool/keys/funder.json"),
-        PathBuf::from,
-    );
-    let endpoint: RpcEndpoint = rpc_url.parse()?;
-    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
-    let signer = Arc::new(LocalKeypair::load(project_root, signer_path)?);
-    let context = AdapterContext {
-        rpc_url: gateway.endpoint().as_url().clone(),
-        signer: signer.pubkey().to_string(),
-        confirmation_timeout: Duration::from_secs(20),
-    };
-    Ok((gateway, signer, context))
-}
-
 async fn required_account(
     gateway: &SolanaGateway,
     address: &Pubkey,
@@ -363,27 +348,4 @@ async fn submit_and_confirm(
         }
         sleep(Duration::from_millis(100)).await;
     }
-}
-
-fn sanitize_signature(signature: &str) -> String {
-    if signature.len() <= 20 {
-        return signature.to_owned();
-    }
-    format!(
-        "{}...{}",
-        &signature[..10],
-        &signature[signature.len() - 10..]
-    )
-}
-
-fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temporary = path.with_extension("json.tmp");
-    let mut bytes = serde_json::to_vec_pretty(value)?;
-    bytes.push(b'\n');
-    fs::write(&temporary, bytes)?;
-    fs::rename(temporary, path)?;
-    Ok(())
 }

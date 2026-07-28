@@ -1,28 +1,27 @@
 //! Native stake lifecycle adapter for deterministic Surfpool acceptance.
 
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 
 use cooker_core::{
-    ActionAdapter, ActionId, ActionPayload, AdapterContext, ChainGateway, ChainReceipt,
-    ConfirmationStatus, CookerError, PlannedAction, PreparedAction, StakeOperation,
-    StateExpectation,
+    ActionAdapter, ActionId, ActionPayload, AdapterContext, ChainReceipt, ConfirmationStatus,
+    CookerError, PlannedAction, PreparedAction, StakeOperation, StateExpectation,
 };
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
 use solana_stake_interface::{
     instruction as stake_instruction,
     program::ID as STAKE_PROGRAM_ID,
     state::{Authorized, Lockup, StakeStateV2},
 };
-use solana_transaction::Transaction;
-use tokio::time::{Instant, sleep};
 
 use crate::{
-    AccountInfo, LocalKeypair, SignedWireTransaction, SolanaGateway, TransactionRecord,
+    AccountInfo, LocalKeypair, SolanaGateway, TransactionRecord,
+    adapter_support::{
+        attribute_u64, confirmed_record, find_expectation, observe_until_terminal, prepared_action,
+        transaction_native_balances, validate_context, validate_prepared,
+    },
     build_signed_transaction,
 };
 
-const OBSERVATION_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const POSITION_KIND: &str = "native_stake_position";
 const PAYER_KIND: &str = "native_stake_payer_delta";
 const FEE_KIND: &str = "transaction_fee";
@@ -468,7 +467,7 @@ impl ActionAdapter for NativeStakeAdapter {
         prepared: &PreparedAction,
     ) -> Result<ChainReceipt, CookerError> {
         validate_context(context, &self.gateway, &self.signer)?;
-        validate_prepared(action, prepared, &self.signer)?;
+        validate_prepared(action, prepared, &self.signer, "stake")?;
         let ActionPayload::StakeLifecycle {
             operation,
             lamports,
@@ -486,7 +485,7 @@ impl ActionAdapter for NativeStakeAdapter {
         ) {
             return Ok(receipt);
         }
-        let record = confirmed_record(&self.gateway, prepared).await?;
+        let record = confirmed_record(&self.gateway, prepared, "stake").await?;
         match operation {
             StakeOperation::Enter => {
                 self.observe_enter(action, prepared, &mut receipt, &record, *lamports)
@@ -608,131 +607,6 @@ fn require_zero_lifecycle_lamports(
     Ok(())
 }
 
-fn validate_context(
-    context: &AdapterContext,
-    gateway: &SolanaGateway,
-    signer: &LocalKeypair,
-) -> Result<(), CookerError> {
-    if &context.rpc_url != gateway.endpoint().as_url() {
-        return Err(CookerError::InvalidConfig(
-            "adapter context RPC differs from the verified gateway endpoint".to_owned(),
-        ));
-    }
-    let context_signer = Pubkey::from_str(&context.signer).map_err(|error| {
-        CookerError::InvalidConfig(format!("adapter context signer is invalid: {error}"))
-    })?;
-    if context_signer != signer.pubkey() {
-        return Err(CookerError::InvalidConfig(
-            "adapter context signer differs from the loaded local keypair".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_prepared(
-    action: &PlannedAction,
-    prepared: &PreparedAction,
-    signer: &LocalKeypair,
-) -> Result<(), CookerError> {
-    if prepared.action_id != action.id {
-        return Err(CookerError::Codec(
-            "prepared stake transaction belongs to another action".to_owned(),
-        ));
-    }
-    let expected_signature = Signature::from_str(&prepared.signature)
-        .map_err(|error| CookerError::Codec(format!("invalid prepared signature: {error}")))?;
-    let transaction: Transaction = bincode::deserialize(&prepared.transaction)
-        .map_err(|error| CookerError::Codec(format!("invalid prepared transaction: {error}")))?;
-    if transaction.signatures.first() != Some(&expected_signature)
-        || transaction.message.recent_blockhash.to_string() != prepared.recent_blockhash
-        || transaction.message.account_keys.first() != Some(&signer.pubkey())
-        || !expected_signature.verify(signer.pubkey().as_ref(), &transaction.message_data())
-    {
-        return Err(CookerError::Codec(
-            "prepared stake transaction metadata or signature is inconsistent".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-async fn observe_until_terminal(
-    gateway: &SolanaGateway,
-    context: &AdapterContext,
-    prepared: &PreparedAction,
-) -> Result<ChainReceipt, CookerError> {
-    let started = Instant::now();
-    loop {
-        let receipt =
-            ChainGateway::observe(gateway, &prepared.action_id, &prepared.signature).await?;
-        if matches!(
-            receipt.status,
-            ConfirmationStatus::Confirmed
-                | ConfirmationStatus::Finalized
-                | ConfirmationStatus::Failed
-        ) {
-            return Ok(receipt);
-        }
-        if receipt.status == ConfirmationStatus::Missing
-            && gateway.block_height().await? > prepared.last_valid_block_height
-        {
-            return Ok(receipt);
-        }
-        let elapsed = started.elapsed();
-        if elapsed >= context.confirmation_timeout {
-            return Ok(receipt);
-        }
-        sleep(OBSERVATION_POLL_INTERVAL.min(context.confirmation_timeout.saturating_sub(elapsed)))
-            .await;
-    }
-}
-
-async fn confirmed_record(
-    gateway: &SolanaGateway,
-    prepared: &PreparedAction,
-) -> Result<TransactionRecord, CookerError> {
-    let signature = Signature::from_str(&prepared.signature)
-        .map_err(|error| CookerError::Codec(format!("invalid prepared signature: {error}")))?;
-    gateway.transaction(&signature).await?.ok_or_else(|| {
-        CookerError::Chain("confirmed stake signature had no transaction metadata".to_owned())
-    })
-}
-
-fn transaction_native_balances(
-    record: &TransactionRecord,
-    account: &Pubkey,
-    label: &str,
-) -> Result<(u64, u64), CookerError> {
-    let index = record
-        .account_keys
-        .iter()
-        .position(|candidate| candidate == account)
-        .ok_or_else(|| {
-            CookerError::Codec(format!("transaction metadata omitted {label} account"))
-        })?;
-    let before = *record.pre_balances.get(index).ok_or_else(|| {
-        CookerError::Codec(format!("transaction metadata omitted {label} pre-balance"))
-    })?;
-    let after = *record.post_balances.get(index).ok_or_else(|| {
-        CookerError::Codec(format!("transaction metadata omitted {label} post-balance"))
-    })?;
-    Ok((before, after))
-}
-
-fn prepared_action(
-    action: &PlannedAction,
-    signed: SignedWireTransaction,
-    expectations: Vec<StateExpectation>,
-) -> PreparedAction {
-    PreparedAction {
-        action_id: action.id.clone(),
-        signature: signed.signature.to_string(),
-        transaction: signed.bytes,
-        recent_blockhash: signed.recent_blockhash,
-        last_valid_block_height: signed.last_valid_block_height,
-        expectations,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn position_expectation(
     operation: StakeOperation,
@@ -775,27 +649,6 @@ fn payer_expectation(payer: Pubkey, before_lamports: u64, action_debit: u64) -> 
             ("action_debit_lamports".to_owned(), action_debit.to_string()),
         ]),
     }
-}
-
-fn find_expectation<'a>(
-    prepared: &'a PreparedAction,
-    kind: &str,
-    account: &Pubkey,
-) -> Result<&'a StateExpectation, CookerError> {
-    prepared
-        .expectations
-        .iter()
-        .find(|item| item.kind == kind && item.account == account.to_string())
-        .ok_or_else(|| CookerError::Codec(format!("prepared action omitted {kind}")))
-}
-
-fn attribute_u64(expectation: &StateExpectation, key: &str) -> Result<u64, CookerError> {
-    expectation
-        .attributes
-        .get(key)
-        .ok_or_else(|| CookerError::Codec(format!("expectation omitted {key}")))?
-        .parse()
-        .map_err(|error| CookerError::Codec(format!("invalid expectation {key}: {error}")))
 }
 
 fn position_observation(

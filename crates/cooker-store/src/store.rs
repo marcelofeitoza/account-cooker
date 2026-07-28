@@ -1639,69 +1639,10 @@ impl StateStore for Store {
         lease: &ActionLease,
         receipt: &ChainReceipt,
     ) -> Result<(), CookerError> {
-        if receipt.action_id != lease.action_id {
-            return Err(lease_conflict(
-                lease,
-                "receipt action does not match leased action",
-            ));
-        }
-        let receipt_json = encode_json(receipt)?;
-        let receipt_hash = blake3::hash(receipt_json.as_bytes()).to_hex().to_string();
-        let slot = receipt
-            .slot
-            .map(|value| to_i64(value, "receipt slot"))
-            .transpose()?;
         let mut connection = self.lock()?;
         let transaction = immediate(&mut connection, "record chain receipt")?;
         verify_lease(&transaction, lease, receipt.observed_at)?;
-        let submission = load_submission(&transaction, &lease.action_id)?.ok_or_else(|| {
-            CookerError::Store(format!(
-                "action {} has no durable submission to observe",
-                lease.action_id
-            ))
-        })?;
-        if submission.signature != receipt.signature {
-            return Err(CookerError::Store(format!(
-                "receipt signature differs from durable submission for {}",
-                lease.action_id
-            )));
-        }
-        let inserted = transaction
-            .execute(
-                "INSERT OR IGNORE INTO receipts(\
-                    action_id, signature, confirmation_status, slot, postconditions_met,\
-                    receipt_json, receipt_hash, observed_at\
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    lease.action_id.as_str(),
-                    receipt.signature,
-                    confirmation_status_name(receipt.status),
-                    slot,
-                    i64::from(receipt.postconditions_met),
-                    receipt_json,
-                    receipt_hash,
-                    timestamp(receipt.observed_at)
-                ],
-            )
-            .map_err(|error| sqlite_error("insert chain receipt", error))?;
-        if inserted == 1 {
-            append_event(
-                &transaction,
-                &lease.action_id,
-                "receipt_recorded",
-                None,
-                None,
-                receipt.observed_at,
-                receipt.error.as_deref(),
-                Some(&serde_json::json!({
-                    "signature": receipt.signature,
-                    "status": confirmation_status_name(receipt.status),
-                    "slot": receipt.slot,
-                    "postconditions_met": receipt.postconditions_met,
-                    "receipt_hash": receipt_hash,
-                })),
-            )?;
-        }
+        insert_receipt(&transaction, lease, receipt)?;
         transaction
             .commit()
             .map_err(|error| sqlite_error("commit chain receipt", error))?;

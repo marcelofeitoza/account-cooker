@@ -16,6 +16,10 @@ use cooker_solana::{
 use solana_pubkey::Pubkey;
 use spl_associated_token_account_interface::address::get_associated_token_address;
 
+mod common;
+
+use common::sanitize_signature;
+
 const DEFAULT_INPUT_MINT: &str = "So11111111111111111111111111111111111111112";
 const DEFAULT_OUTPUT_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const DEFAULT_INPUT_AMOUNT: &str = "100000000";
@@ -264,17 +268,6 @@ fn rebind_instruction(
             }
         }
     }
-}
-
-fn sanitize_signature(signature: &str) -> String {
-    if signature.len() <= 20 {
-        return signature.to_owned();
-    }
-    format!(
-        "{}...{}",
-        &signature[..10],
-        &signature[signature.len() - 10..]
-    )
 }
 
 #[test]

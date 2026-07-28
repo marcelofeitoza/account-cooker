@@ -16,31 +16,30 @@ use std::{
     fs, io,
     path::PathBuf,
     str::FromStr,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use chrono::{TimeDelta, Utc};
 use cooker_core::{
-    ActionAdapter, ActionId, ActionKind, ActionPayload, ActionState, AdapterContext, AgentId,
-    BudgetConfig, ChainGateway, ChainReceipt, Clock, CookerError, PlannedAction, Policy,
-    PolicyConfig, RunId, SafetyPolicy, SimulationReceipt, StateStore, SystemClock,
+    ActionId, ActionPayload, ActionState, ChainGateway, ChainReceipt, CookerError, RunId,
+    SimulationReceipt, StateStore,
 };
-use cooker_runtime::{
-    ExecutionCheckpoint, ExecutionResult, FaultInjector, NoFaults, RuntimeEngine, RuntimeSettings,
-};
-use cooker_solana::{
-    LocalKeypair, NativeTransferAdapter, PublicCluster, RpcEndpoint, SolanaGateway,
-};
+use cooker_runtime::{ExecutionResult, NoFaults};
+use cooker_solana::{LocalKeypair, PublicCluster, RpcEndpoint, SolanaGateway};
 use cooker_store::{RunRegistration, Store, StoreIdentity};
 use serde_json::json;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use tokio::sync::watch;
 use url::Url;
+
+mod common;
+
+use common::{
+    LoseOneSendResponse, NativeSoakParams, env_usize, native_transfer_runtime,
+    planned_native_actions, write_json,
+};
 
 const DEFAULT_TRANSACTION_COUNT: usize = 200;
 const DEFAULT_CONCURRENCY: usize = 8;
@@ -58,24 +57,14 @@ const MAX_RECONCILIATION_ROUNDS: usize = 6;
 /// A 45-second pause normally advances the validity window substantially. The bounded loop
 /// permits multiple passes because public slot progression is external.
 const RECONCILIATION_BACKOFF: Duration = Duration::from_secs(45);
-
-#[derive(Debug, Default)]
-struct LoseOneSendResponse {
-    triggered: AtomicBool,
-}
-
-impl FaultInjector for LoseOneSendResponse {
-    fn check(&self, checkpoint: ExecutionCheckpoint) -> Result<(), CookerError> {
-        if checkpoint == ExecutionCheckpoint::AfterSendResponseLost
-            && !self.triggered.swap(true, Ordering::SeqCst)
-        {
-            return Err(CookerError::Chain(
-                "injected devnet send-response loss".to_owned(),
-            ));
-        }
-        Ok(())
-    }
-}
+const RUN: NativeSoakParams = NativeSoakParams {
+    model_version: MODEL_VERSION,
+    transfer_lamports: TRANSFER_LAMPORTS,
+    max_fee_lamports: MAX_FEE_LAMPORTS,
+    reserve_lamports: RESERVE_LAMPORTS,
+    confirmation_timeout: CONFIRMATION_TIMEOUT,
+    max_concurrency: DEFAULT_CONCURRENCY,
+};
 
 /// Gateway wrapper that waits for a submitted signature to become visible before returning.
 ///
@@ -206,7 +195,10 @@ async fn bounded_devnet_run_confirms_and_reconciles_without_duplicate_intents()
 
     let run_id = RunId::new();
     let scheduled_at = Utc::now();
-    let actions = planned_actions(run_id, scheduled_at, transaction_count);
+    let actions =
+        planned_native_actions(run_id, scheduled_at, transaction_count, RUN, |sequence| {
+            run_scoped_destination(run_id, sequence)
+        });
     let destinations: BTreeSet<String> = actions
         .iter()
         .filter_map(|action| match &action.payload {
@@ -252,15 +244,22 @@ async fn bounded_devnet_run_confirms_and_reconciles_without_duplicate_intents()
     // A small barriered prefix carries the injected response loss. Most actions run without
     // that visibility barrier, but the reported end-to-end interval includes both batches.
     let first_batch_size = (transaction_count / 10).max(4).min(transaction_count);
-    let loss = Arc::new(LoseOneSendResponse::default());
-    let first_runtime = runtime(
+    let loss = Arc::new(LoseOneSendResponse::new(
+        "injected devnet send-response loss",
+    ));
+    let first_runtime = native_transfer_runtime(
         Arc::clone(&store),
-        Arc::clone(&gateway),
+        &gateway,
+        Arc::new(ConfirmSubmissionGateway {
+            inner: Arc::clone(&gateway),
+        }),
         Arc::clone(&signer),
         &destinations,
-        max_concurrency,
+        NativeSoakParams {
+            max_concurrency,
+            ..RUN
+        },
         loss.clone(),
-        true,
     )?;
     let first_claimed = store.claim_due_actions(
         "devnet-before-reconstruction",
@@ -279,7 +278,7 @@ async fn bounded_devnet_run_confirms_and_reconciles_without_duplicate_intents()
     // At least the injected loss must land in the ambiguous bucket. A public endpoint may add
     // more, and every one of them is counted and reconciled rather than assumed away.
     assert!(first_summary.unknown >= 1, "{first_summary:?}");
-    assert!(loss.triggered.load(Ordering::SeqCst));
+    assert!(loss.triggered());
 
     // Rebuild the runtime engine, store handle, and signer inside this process. The original
     // SolanaGateway object and OS process remain alive. Durable action state is read from the
@@ -294,14 +293,17 @@ async fn bounded_devnet_run_confirms_and_reconciles_without_duplicate_intents()
         StoreIdentity::new(PublicCluster::Devnet.as_str(), &cluster.genesis_hash)?,
     )?);
     store.verify_integrity()?;
-    let second_runtime = runtime(
+    let second_runtime = native_transfer_runtime(
         Arc::clone(&store),
-        Arc::clone(&gateway),
+        &gateway,
+        Arc::<SolanaGateway>::clone(&gateway),
         Arc::clone(&signer),
         &destinations,
-        max_concurrency,
+        NativeSoakParams {
+            max_concurrency,
+            ..RUN
+        },
         Arc::new(NoFaults),
-        false,
     )?;
     let second_claimed = store.claim_due_actions(
         "devnet-after-reconstruction",
@@ -696,118 +698,10 @@ fn classify_unconfirmed_cause(events: &[cooker_store::ActionEventRecord]) -> &'s
     cause
 }
 
-fn planned_actions(
-    run_id: RunId,
-    scheduled_at: chrono::DateTime<Utc>,
-    count: usize,
-) -> Vec<PlannedAction> {
-    (0..count)
-        .map(|index| {
-            let agent_id = AgentId::new();
-            let sequence = u64::try_from(index).unwrap_or(u64::MAX);
-            let destination = run_scoped_destination(run_id, sequence);
-            PlannedAction {
-                id: ActionId::derive(run_id, agent_id, sequence, MODEL_VERSION),
-                run_id,
-                agent_id,
-                sequence,
-                model_version: MODEL_VERSION.to_owned(),
-                scheduled_at,
-                payload: ActionPayload::NativeTransfer {
-                    destination: destination.to_string(),
-                    lamports: TRANSFER_LAMPORTS,
-                },
-                max_fee_lamports: MAX_FEE_LAMPORTS,
-                max_account_creation_lamports: 0,
-                created_at: scheduled_at,
-            }
-        })
-        .collect()
-}
-
-/// The run identifier namespaces destinations, and sequence makes each address unique within
-/// one run. Fresh UUID run identifiers make cross-run reuse negligibly unlikely.
-///
-/// Every destination receives more than the rent-exempt minimum for a zero-length account, so
-/// the transfer creates a durable, independently readable account on the public cluster.
 fn run_scoped_destination(run_id: RunId, sequence: u64) -> Pubkey {
     let mut bytes = [0_u8; 32];
     bytes[..8].copy_from_slice(b"cooker-d");
     bytes[8..24].copy_from_slice(run_id.0.as_bytes());
     bytes[24..].copy_from_slice(&sequence.to_le_bytes());
     Pubkey::new_from_array(bytes)
-}
-
-fn runtime(
-    store: Arc<Store>,
-    gateway: Arc<SolanaGateway>,
-    signer: Arc<LocalKeypair>,
-    destinations: &BTreeSet<String>,
-    max_concurrency: usize,
-    faults: Arc<dyn FaultInjector>,
-    confirm_first_submission: bool,
-) -> Result<Arc<RuntimeEngine>, CookerError> {
-    let total_budget = u64::try_from(destinations.len())
-        .unwrap_or(u64::MAX)
-        .saturating_mul(TRANSFER_LAMPORTS + MAX_FEE_LAMPORTS);
-    let policy: Arc<dyn Policy> = Arc::new(SafetyPolicy::new(PolicyConfig {
-        budgets: BudgetConfig {
-            daily_lamports: total_budget,
-            lifetime_lamports: total_budget,
-            reserve_lamports: RESERVE_LAMPORTS,
-            max_fee_lamports: MAX_FEE_LAMPORTS,
-            max_account_creation_lamports: 0,
-        },
-        allowed_actions: [ActionKind::NativeTransfer].into_iter().collect(),
-        max_action_amounts: BTreeMap::from([(ActionKind::NativeTransfer, TRANSFER_LAMPORTS)]),
-        allowed_destinations: destinations.clone(),
-        allowed_mints: BTreeSet::new(),
-        native_input_mints: BTreeSet::new(),
-        max_slippage_bps: 0,
-    })?);
-    let context = AdapterContext {
-        rpc_url: gateway.endpoint().as_url().clone(),
-        signer: signer.pubkey().to_string(),
-        confirmation_timeout: CONFIRMATION_TIMEOUT,
-    };
-    let adapter: Arc<dyn ActionAdapter> =
-        Arc::new(NativeTransferAdapter::new(Arc::clone(&gateway), signer));
-    let store_trait: Arc<dyn StateStore> = store;
-    let gateway_trait: Arc<dyn ChainGateway> = if confirm_first_submission {
-        Arc::new(ConfirmSubmissionGateway { inner: gateway })
-    } else {
-        gateway
-    };
-    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    Ok(Arc::new(RuntimeEngine::new(
-        store_trait,
-        gateway_trait,
-        policy,
-        [(ActionKind::NativeTransfer, adapter)],
-        RuntimeSettings {
-            adapter_context: context,
-            max_concurrency,
-        },
-        faults,
-        clock,
-    )?))
-}
-
-fn env_usize(name: &str, default: usize) -> Result<usize, Box<dyn std::error::Error>> {
-    std::env::var(name).map_or(Ok(default), |value| {
-        let parsed = value.parse::<usize>()?;
-        if parsed == 0 {
-            return Err(io::Error::other(format!("{name} must be positive")).into());
-        }
-        Ok(parsed)
-    })
-}
-
-fn write_json(path: &std::path::Path, value: &serde_json::Value) -> Result<(), io::Error> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut rendered = serde_json::to_string_pretty(value)?;
-    rendered.push('\n');
-    fs::write(path, rendered)
 }

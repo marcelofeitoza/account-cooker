@@ -752,34 +752,12 @@ fn per_feature_metrics(
     threshold: f64,
 ) -> Result<BTreeMap<FeatureFamily, EvaluationMetrics>, String> {
     let mut output = BTreeMap::new();
-    for family in [
-        FeatureFamily::Timing,
-        FeatureFamily::Amount,
-        FeatureFamily::Sequence,
-        FeatureFamily::Destination,
-        FeatureFamily::Synchrony,
-        FeatureFamily::Funding,
-        FeatureFamily::FundingRound,
-        FeatureFamily::FundingBatch,
-        FeatureFamily::Route,
-        FeatureFamily::BalanceRank,
-    ] {
+    for family in FeatureFamily::ALL {
         let family_pairs: Vec<_> = pairs
             .iter()
             .map(|pair| {
                 let mut pair = pair.clone();
-                pair.composite = match family {
-                    FeatureFamily::Timing => pair.timing,
-                    FeatureFamily::Amount => pair.amount,
-                    FeatureFamily::Sequence => pair.sequence,
-                    FeatureFamily::Destination => pair.destination,
-                    FeatureFamily::Synchrony => pair.synchrony,
-                    FeatureFamily::Funding => pair.funding,
-                    FeatureFamily::FundingRound => pair.funding_round,
-                    FeatureFamily::FundingBatch => pair.funding_batch,
-                    FeatureFamily::Route => pair.route,
-                    FeatureFamily::BalanceRank => pair.balance_rank,
-                };
+                pair.composite = pair_feature(&pair, family);
                 pair
             })
             .collect();
@@ -793,18 +771,7 @@ fn feature_separations(
     truth: &GroundTruth,
 ) -> Result<BTreeMap<FeatureFamily, FeatureSeparation>, String> {
     let mut output = BTreeMap::new();
-    for family in [
-        FeatureFamily::Timing,
-        FeatureFamily::Amount,
-        FeatureFamily::Sequence,
-        FeatureFamily::Destination,
-        FeatureFamily::Synchrony,
-        FeatureFamily::Funding,
-        FeatureFamily::FundingRound,
-        FeatureFamily::FundingBatch,
-        FeatureFamily::Route,
-        FeatureFamily::BalanceRank,
-    ] {
+    for family in FeatureFamily::ALL {
         let mut within = Vec::new();
         let mut between = Vec::new();
         for pair in pairs {

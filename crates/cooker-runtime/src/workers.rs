@@ -1,8 +1,8 @@
 //! Bounded task orchestration over already claimed action leases.
 
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, future::Future, sync::Arc};
 
-use cooker_core::{ActionLease, CookerError};
+use cooker_core::{ActionLease, Clock, CookerError, StateStore};
 use tokio::{sync::watch, task::JoinSet};
 
 use crate::{ExecutionResult, RuntimeEngine};
@@ -39,57 +39,89 @@ impl RuntimeEngine {
     pub async fn run_claimed(
         self: Arc<Self>,
         leases: Vec<ActionLease>,
-        mut stop: watch::Receiver<bool>,
+        stop: watch::Receiver<bool>,
     ) -> WorkerSummary {
-        let mut pending: VecDeque<_> = leases.into();
-        let mut workers = JoinSet::new();
-        let mut summary = WorkerSummary::default();
-        let mut stop_open = true;
-
-        loop {
-            while workers.len() < self.max_concurrency && !*stop.borrow() {
-                let Some(lease) = pending.pop_front() else {
-                    break;
-                };
+        let store = Arc::clone(&self.store);
+        let clock = Arc::clone(&self.clock);
+        drain_bounded(
+            leases,
+            self.max_concurrency,
+            stop,
+            store.as_ref(),
+            clock.as_ref(),
+            |lease| {
                 let runtime = Arc::clone(&self);
-                workers.spawn(async move { runtime.execute(&lease).await });
-                summary.peak_workers = summary.peak_workers.max(workers.len());
-            }
-
-            if workers.is_empty() {
-                break;
-            }
-            tokio::select! {
-                changed = stop.changed(), if stop_open => {
-                    if changed.is_err() {
-                        stop_open = false;
-                    }
-                }
-                joined = workers.join_next() => {
-                    if let Some(result) = joined {
-                        match result {
-                            Ok(result) => record_result(&mut summary, result),
-                            Err(error) => summary.errors.push(format!("worker task failed: {error}")),
-                        }
-                    }
-                }
-            }
-        }
-
-        // Leases not started after cancellation are released for a later controller pass.
-        for lease in pending {
-            if let Err(error) = self.store.release_lease(&lease, self.clock.now()) {
-                summary.errors.push(error.to_string());
-            }
-        }
-        while let Some(result) = workers.join_next().await {
-            match result {
-                Ok(result) => record_result(&mut summary, result),
-                Err(error) => summary.errors.push(format!("worker task failed: {error}")),
-            }
-        }
-        summary
+                async move { runtime.execute(&lease).await }
+            },
+        )
+        .await
     }
+}
+
+/// Drain claimed leases through `settle` with at most `max_concurrency` workers in flight.
+///
+/// The kill switch stops new workers from starting; leases that never started are released so a
+/// later controller pass can reclaim them. This is the only bounded-concurrency loop in the
+/// runtime: the single-signer engine and the multi-agent fleet both settle their batches here.
+pub(crate) async fn drain_bounded<F, Fut>(
+    leases: Vec<ActionLease>,
+    max_concurrency: usize,
+    mut stop: watch::Receiver<bool>,
+    store: &dyn StateStore,
+    clock: &dyn Clock,
+    settle: F,
+) -> WorkerSummary
+where
+    F: Fn(ActionLease) -> Fut,
+    Fut: Future<Output = Result<ExecutionResult, CookerError>> + Send + 'static,
+{
+    let mut pending: VecDeque<_> = leases.into();
+    let mut workers = JoinSet::new();
+    let mut summary = WorkerSummary::default();
+    let mut stop_open = true;
+
+    loop {
+        while workers.len() < max_concurrency && !*stop.borrow() {
+            let Some(lease) = pending.pop_front() else {
+                break;
+            };
+            workers.spawn(settle(lease));
+            summary.peak_workers = summary.peak_workers.max(workers.len());
+        }
+
+        if workers.is_empty() {
+            break;
+        }
+        tokio::select! {
+            changed = stop.changed(), if stop_open => {
+                if changed.is_err() {
+                    stop_open = false;
+                }
+            }
+            joined = workers.join_next() => {
+                if let Some(result) = joined {
+                    match result {
+                        Ok(result) => record_result(&mut summary, result),
+                        Err(error) => summary.errors.push(format!("worker task failed: {error}")),
+                    }
+                }
+            }
+        }
+    }
+
+    for lease in pending {
+        match store.release_lease(&lease, clock.now()) {
+            Ok(()) => summary.released_without_start += 1,
+            Err(error) => summary.errors.push(error.to_string()),
+        }
+    }
+    while let Some(result) = workers.join_next().await {
+        match result {
+            Ok(result) => record_result(&mut summary, result),
+            Err(error) => summary.errors.push(format!("worker task failed: {error}")),
+        }
+    }
+    summary
 }
 
 pub(crate) fn record_result(

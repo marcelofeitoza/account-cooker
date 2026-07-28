@@ -2,11 +2,13 @@
 
 #![forbid(unsafe_code)]
 
+mod adapter_support;
 mod adapters;
 mod error;
 mod fleet;
 mod jupiter;
 mod network;
+mod private_fs;
 mod rpc;
 mod signer;
 mod stake;

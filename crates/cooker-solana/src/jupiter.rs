@@ -14,8 +14,8 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use cooker_core::{
-    ActionAdapter, ActionPayload, AdapterContext, ChainGateway, ChainReceipt, ConfirmationStatus,
-    CookerError, PlannedAction, PreparedAction, StateExpectation,
+    ActionAdapter, ActionPayload, AdapterContext, ChainReceipt, ConfirmationStatus, CookerError,
+    PlannedAction, PreparedAction, StateExpectation,
 };
 use reqwest::{Client, redirect::Policy as RedirectPolicy};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -31,11 +31,11 @@ use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
 use spl_associated_token_account_interface::address::get_associated_token_address;
 use spl_token_interface::state::Account as TokenAccount;
-use tokio::time::{Instant, sleep};
 use zeroize::Zeroize;
 
 use crate::{
-    LatestBlockhash, LocalKeypair, SignedWireTransaction, SolanaGateway,
+    LocalKeypair, SolanaGateway,
+    adapter_support::{observe_until_terminal, parse_pubkey},
     build_signed_v0_transaction,
 };
 
@@ -53,7 +53,6 @@ const MAX_INSTRUCTIONS: usize = 16;
 const MAX_ACCOUNTS_PER_INSTRUCTION: usize = 64;
 const MAX_INSTRUCTION_DATA_BYTES: usize = 2_048;
 const MAX_LOOKUP_TABLES: usize = 8;
-const OBSERVATION_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111111112";
 const JUPITER_INPUT_KIND: &str = "jupiter_input_token_delta";
 const JUPITER_OUTPUT_KIND: &str = "jupiter_output_token_delta";
@@ -387,14 +386,6 @@ impl JupiterPolicy {
             allowed_top_level_programs,
             allowed_writable_accounts,
         })
-    }
-
-    /// Add a reviewed writable account to this policy.
-    #[must_use]
-    pub fn with_writable_account(mut self, account: Pubkey) -> Self {
-        self.allowed_writable_accounts.insert(account);
-        self.allowed_accounts.insert(account);
-        self
     }
 
     /// Add reviewed writable accounts to this policy.
@@ -1060,19 +1051,6 @@ impl JupiterAdapter {
         }
     }
 
-    /// Fetch a quote and its unsigned instructions, validating each response before proceeding.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CookerError`] for HTTP, decoding, or policy failure.
-    pub async fn fetch_unsigned_plan(
-        &self,
-    ) -> Result<(JupiterQuote, JupiterSwapInstructions), CookerError> {
-        let quote = self.client.quote(&self.policy).await?;
-        let instructions = self.client.swap_instructions(&self.policy, &quote).await?;
-        Ok((quote, instructions))
-    }
-
     /// Assemble a previously captured and reviewed unsigned Jupiter plan against current
     /// Surfpool state.
     ///
@@ -1094,32 +1072,6 @@ impl JupiterAdapter {
         let (bound, input_mint, output_mint) = self.bind_action(context, action).await?;
         self.assemble_plan(action, &bound, input_mint, output_mint, quote, response)
             .await
-    }
-
-    /// Validate, compile, and locally sign a v0 transaction with Surfpool-resolved tables.
-    ///
-    /// No response from Jupiter can carry transaction bytes or signatures into this method.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CookerError`] for policy, lookup-table, compilation, or signing failure.
-    pub fn build_signed_v0(
-        &self,
-        quote: &JupiterQuote,
-        response: &JupiterSwapInstructions,
-        lookup_tables: &[AddressLookupTableAccount],
-        signer: &LocalKeypair,
-        latest: LatestBlockhash,
-    ) -> Result<SignedWireTransaction, CookerError> {
-        if signer.pubkey() != self.policy.signer {
-            return Err(CookerError::Policy(
-                "local signer differs from Jupiter policy signer".to_owned(),
-            ));
-        }
-        let (instructions, _) = self.policy.validate_swap_instructions(quote, response)?;
-        self.policy
-            .validate_lookup_tables(response, lookup_tables)?;
-        build_signed_v0_transaction(&instructions, lookup_tables, signer, latest)
     }
 
     async fn bind_action(
@@ -1234,7 +1186,7 @@ impl ActionAdapter for JupiterAdapter {
         };
         let input_mint = parse_canonical_pubkey(input_mint, "action input mint")?;
         let output_mint = parse_canonical_pubkey(output_mint, "action output mint")?;
-        let mut receipt = observe_swap_until_terminal(&self.gateway, context, prepared).await?;
+        let mut receipt = observe_until_terminal(&self.gateway, context, prepared).await?;
         if !matches!(
             receipt.status,
             ConfirmationStatus::Confirmed | ConfirmationStatus::Finalized
@@ -1538,37 +1490,6 @@ fn validate_prepared_swap(
         ));
     }
     Ok(())
-}
-
-async fn observe_swap_until_terminal(
-    gateway: &SolanaGateway,
-    context: &AdapterContext,
-    prepared: &PreparedAction,
-) -> Result<ChainReceipt, CookerError> {
-    let started = Instant::now();
-    loop {
-        let receipt =
-            ChainGateway::observe(gateway, &prepared.action_id, &prepared.signature).await?;
-        if matches!(
-            receipt.status,
-            ConfirmationStatus::Confirmed
-                | ConfirmationStatus::Finalized
-                | ConfirmationStatus::Failed
-        ) {
-            return Ok(receipt);
-        }
-        if receipt.status == ConfirmationStatus::Missing
-            && gateway.block_height().await? > prepared.last_valid_block_height
-        {
-            return Ok(receipt);
-        }
-        let elapsed = started.elapsed();
-        if elapsed >= context.confirmation_timeout {
-            return Ok(receipt);
-        }
-        sleep(OBSERVATION_POLL_INTERVAL.min(context.confirmation_timeout.saturating_sub(elapsed)))
-            .await;
-    }
 }
 
 fn find_swap_expectation<'a>(
@@ -1945,10 +1866,6 @@ fn parse_canonical_pubkey(value: &str, label: &str) -> Result<Pubkey, CookerErro
     Ok(parsed)
 }
 
-fn parse_pubkey(value: &str, label: &str) -> Result<Pubkey, CookerError> {
-    Pubkey::from_str(value).map_err(|error| CookerError::Codec(format!("invalid {label}: {error}")))
-}
-
 fn canonical_top_level_programs(jupiter_program: Pubkey) -> Result<BTreeSet<Pubkey>, CookerError> {
     Ok([
         jupiter_program,
@@ -1973,6 +1890,7 @@ mod tests {
     use solana_transaction::versioned::VersionedTransaction;
 
     use super::*;
+    use crate::LatestBlockhash;
 
     const QUOTE_FIXTURE: &str =
         include_str!("../../../fixtures/surfpool/jupiter/raydium-clmm-sol-usdc.quote.json");

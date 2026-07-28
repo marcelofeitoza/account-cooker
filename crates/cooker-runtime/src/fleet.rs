@@ -1,18 +1,15 @@
 //! Multi-agent routing over isolated single-signer runtimes.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     fmt,
     sync::Arc,
 };
 
 use cooker_core::{ActionLease, AgentId, Clock, CookerError, StateStore};
-use tokio::{
-    sync::{Mutex, watch},
-    task::JoinSet,
-};
+use tokio::sync::{Mutex, watch};
 
-use crate::{ExecutionResult, RuntimeEngine, WorkerSummary, workers::record_result};
+use crate::{ExecutionResult, RuntimeEngine, WorkerSummary, workers::drain_bounded};
 
 /// Runtime router that binds every durable agent to one unique signer engine.
 pub struct FleetRuntime {
@@ -182,7 +179,7 @@ impl FleetRuntime {
     async fn run_batch(
         self: Arc<Self>,
         leases: Vec<ActionLease>,
-        mut stop: watch::Receiver<bool>,
+        stop: watch::Receiver<bool>,
         mode: BatchMode,
     ) -> WorkerSummary {
         tracing::info!(
@@ -191,59 +188,26 @@ impl FleetRuntime {
             claimed = leases.len(),
             max_concurrency = self.max_concurrency,
         );
-        let mut pending: VecDeque<_> = leases.into();
-        let mut workers = JoinSet::new();
-        let mut summary = WorkerSummary::default();
-        let mut stop_open = true;
-
-        loop {
-            while workers.len() < self.max_concurrency && !*stop.borrow() {
-                let Some(lease) = pending.pop_front() else {
-                    break;
-                };
+        let store = Arc::clone(&self.store);
+        let clock = Arc::clone(&self.clock);
+        let summary = drain_bounded(
+            leases,
+            self.max_concurrency,
+            stop,
+            store.as_ref(),
+            clock.as_ref(),
+            |lease| {
                 let fleet = Arc::clone(&self);
-                workers.spawn(async move {
+                async move {
                     match mode {
                         BatchMode::Execute => fleet.execute(&lease).await,
                         BatchMode::Reconcile => fleet.reconcile(&lease).await,
                         BatchMode::Audit => fleet.audit_confirmation(&lease).await,
                     }
-                });
-                summary.peak_workers = summary.peak_workers.max(workers.len());
-            }
-
-            if workers.is_empty() {
-                break;
-            }
-            tokio::select! {
-                changed = stop.changed(), if stop_open => {
-                    if changed.is_err() {
-                        stop_open = false;
-                    }
                 }
-                joined = workers.join_next() => {
-                    if let Some(result) = joined {
-                        match result {
-                            Ok(result) => record_result(&mut summary, result),
-                            Err(error) => summary.errors.push(format!("worker task failed: {error}")),
-                        }
-                    }
-                }
-            }
-        }
-
-        for lease in pending {
-            match self.store.release_lease(&lease, self.clock.now()) {
-                Ok(()) => summary.released_without_start += 1,
-                Err(error) => summary.errors.push(error.to_string()),
-            }
-        }
-        while let Some(result) = workers.join_next().await {
-            match result {
-                Ok(result) => record_result(&mut summary, result),
-                Err(error) => summary.errors.push(format!("worker task failed: {error}")),
-            }
-        }
+            },
+        )
+        .await;
         tracing::info!(
             event = "worker_batch_completed",
             mode = ?mode,

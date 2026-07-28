@@ -211,12 +211,6 @@ impl StableScheduler {
         self.in_flight.len()
     }
 
-    /// Whether cancellation has been requested.
-    #[must_use]
-    pub const fn is_cancelled(&self) -> bool {
-        self.cancelled
-    }
-
     fn compact_if_needed(&mut self) {
         let threshold = self.capacity.saturating_mul(2).max(1);
         if self.heap.len() <= threshold {

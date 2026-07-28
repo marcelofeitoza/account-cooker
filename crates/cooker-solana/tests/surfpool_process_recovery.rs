@@ -36,6 +36,10 @@ use solana_signature::Signature;
 use tempfile::TempDir;
 use uuid::Uuid;
 
+mod common;
+
+use common::{advance_past_block_height, sanitize_signature, transaction_native_balances};
+
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
@@ -271,8 +275,12 @@ async fn every_process_crash_checkpoint_recovers_on_real_surfpool() -> TestResul
             let prepared = prepared_before_recovery
                 .as_ref()
                 .ok_or_else(|| io::Error::other("signature checkpoint omitted signed bytes"))?;
-            let advanced =
-                advance_past_block_height(&gateway, prepared.last_valid_block_height).await?;
+            let advanced = advance_past_block_height(
+                &gateway,
+                prepared.last_valid_block_height,
+                MAX_EXPIRY_SLOT_ADVANCE,
+            )
+            .await?;
             assert!(gateway.block_height().await? > prepared.last_valid_block_height);
             advanced
         } else {
@@ -553,7 +561,7 @@ async fn surfpool_recovery_child() -> TestResult {
         &result,
         &json!({
             "outcome": outcome,
-            "signature": signature.map(sanitize_signature),
+            "signature": signature.map(|value| sanitize_signature(&value)),
             "terminal_state": state_name(store.get_action_state(&action_id)?),
             "submit_attempts": submit_attempts,
         }),
@@ -749,32 +757,6 @@ async fn wait_for_transaction(
     }
 }
 
-async fn advance_past_block_height(
-    gateway: &SolanaGateway,
-    target: u64,
-) -> Result<u64, Box<dyn Error>> {
-    let mut advanced = 0_u64;
-    while gateway.block_height().await? <= target {
-        if advanced >= MAX_EXPIRY_SLOT_ADVANCE {
-            return Err(io::Error::other(format!(
-                "Surfpool did not exceed block height {target} within {MAX_EXPIRY_SLOT_ADVANCE} slots"
-            ))
-            .into());
-        }
-        let current = gateway.epoch_info().await?;
-        gateway
-            .time_travel_to_slot(
-                current
-                    .absolute_slot
-                    .checked_add(1)
-                    .ok_or_else(|| io::Error::other("absolute slot overflowed"))?,
-            )
-            .await?;
-        advanced += 1;
-    }
-    Ok(advanced)
-}
-
 fn count_submit_attempts(path: &Path) -> Result<usize, io::Error> {
     match fs::read_to_string(path) {
         Ok(contents) => Ok(contents.lines().filter(|line| *line == "submit").count()),
@@ -873,40 +855,6 @@ fn write_json_file(path: &Path, value: &Value) -> Result<(), Box<dyn Error>> {
 
 fn count_events(events: &[cooker_store::ActionEventRecord], kind: &str) -> usize {
     events.iter().filter(|event| event.kind == kind).count()
-}
-
-fn transaction_native_balances(
-    record: &TransactionRecord,
-    address: &Pubkey,
-    label: &str,
-) -> Result<(u64, u64), io::Error> {
-    let index = record
-        .account_keys
-        .iter()
-        .position(|candidate| candidate == address)
-        .ok_or_else(|| io::Error::other(format!("{label} missing from transaction accounts")))?;
-    let before = record
-        .pre_balances
-        .get(index)
-        .copied()
-        .ok_or_else(|| io::Error::other(format!("{label} pre-balance missing")))?;
-    let after = record
-        .post_balances
-        .get(index)
-        .copied()
-        .ok_or_else(|| io::Error::other(format!("{label} post-balance missing")))?;
-    Ok((before, after))
-}
-
-fn sanitize_signature(signature: &str) -> String {
-    if signature.len() <= 20 {
-        return signature.to_owned();
-    }
-    format!(
-        "{}...{}",
-        &signature[..10],
-        &signature[signature.len() - 10..]
-    )
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

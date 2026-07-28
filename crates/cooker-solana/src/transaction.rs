@@ -79,22 +79,13 @@ pub fn build_signed_transaction_with_signers(
         ));
     }
 
-    let bytes = bincode::serialize(&transaction).map_err(|error| {
-        CookerError::Codec(format!("transaction serialization failed: {error}"))
-    })?;
-    if bytes.len() > MAX_WIRE_TRANSACTION_BYTES {
-        return Err(CookerError::Codec(format!(
-            "transaction is {} bytes; Solana accepts at most {MAX_WIRE_TRANSACTION_BYTES}",
-            bytes.len()
-        )));
-    }
-
-    Ok(SignedWireTransaction {
+    serialize_within_packet_limit(
+        &transaction,
         signature,
-        bytes,
         recent_blockhash,
-        last_valid_block_height: latest.last_valid_block_height,
-    })
+        &latest,
+        "transaction",
+    )
 }
 
 /// Build, sign, verify, and serialize a v0 transaction using lookup tables read from the gateway.
@@ -141,16 +132,34 @@ pub fn build_signed_v0_transaction(
         ));
     }
 
-    let bytes = bincode::serialize(&transaction).map_err(|error| {
-        CookerError::Codec(format!("v0 transaction serialization failed: {error}"))
-    })?;
+    serialize_within_packet_limit(
+        &transaction,
+        signature,
+        recent_blockhash,
+        &latest,
+        "v0 transaction",
+    )
+}
+
+/// Serialize a signed transaction and reject anything larger than one Solana packet.
+///
+/// This is the only place the wire ceiling is enforced, so the legacy and v0 builders cannot
+/// drift apart on the limit that keeps a transaction submittable.
+fn serialize_within_packet_limit(
+    transaction: &impl serde::Serialize,
+    signature: Signature,
+    recent_blockhash: String,
+    latest: &LatestBlockhash,
+    label: &str,
+) -> Result<SignedWireTransaction, CookerError> {
+    let bytes = bincode::serialize(transaction)
+        .map_err(|error| CookerError::Codec(format!("{label} serialization failed: {error}")))?;
     if bytes.len() > MAX_WIRE_TRANSACTION_BYTES {
         return Err(CookerError::Codec(format!(
-            "v0 transaction is {} bytes; Solana accepts at most {MAX_WIRE_TRANSACTION_BYTES}",
+            "{label} is {} bytes; Solana accepts at most {MAX_WIRE_TRANSACTION_BYTES}",
             bytes.len()
         )));
     }
-
     Ok(SignedWireTransaction {
         signature,
         bytes,

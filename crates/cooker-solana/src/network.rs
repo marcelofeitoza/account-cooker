@@ -145,12 +145,6 @@ impl RpcEndpoint {
         &self.url
     }
 
-    /// Consume the wrapper and return its URL.
-    #[must_use]
-    pub fn into_url(self) -> Url {
-        self.url
-    }
-
     /// Return the policy this endpoint was validated under.
     #[must_use]
     pub const fn class(&self) -> RpcEndpointClass {

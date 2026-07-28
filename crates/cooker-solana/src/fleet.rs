@@ -2,22 +2,24 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
 };
 
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
 use chrono::{DateTime, Utc};
 use cooker_core::{AgentId, RunId};
 use serde::{Deserialize, Serialize};
 use solana_pubkey::Pubkey;
 
-use crate::{LocalKeypair, RpcError};
+use crate::{
+    LocalKeypair, RpcError,
+    private_fs::{
+        open_private_new, secure_directory, sync_directory, validate_private_permissions,
+    },
+};
 
 const FLEET_SCHEMA_VERSION: u16 = 1;
 const MAX_FLEET_AGENTS: usize = 10_000;
@@ -335,72 +337,6 @@ fn write_manifest(path: &Path, manifest: &FleetManifest) -> Result<(), RpcError>
         ));
     }
     Ok(())
-}
-
-#[cfg(unix)]
-fn open_private_new(path: &Path, method: &'static str) -> Result<File, RpcError> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|error| RpcError::invalid_input(method, format!("cannot create file: {error}")))
-}
-
-#[cfg(not(unix))]
-fn open_private_new(_path: &Path, method: &'static str) -> Result<File, RpcError> {
-    Err(RpcError::invalid_input(
-        method,
-        "secure fleet persistence requires Unix",
-    ))
-}
-
-#[cfg(unix)]
-fn secure_directory(path: &Path, method: &'static str) -> Result<(), RpcError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|error| {
-        RpcError::invalid_input(method, format!("cannot secure directory: {error}"))
-    })
-}
-
-#[cfg(not(unix))]
-fn secure_directory(_path: &Path, method: &'static str) -> Result<(), RpcError> {
-    Err(RpcError::invalid_input(
-        method,
-        "secure fleet persistence requires Unix",
-    ))
-}
-
-#[cfg(unix)]
-fn validate_private_permissions(
-    metadata: &fs::Metadata,
-    method: &'static str,
-) -> Result<(), RpcError> {
-    if metadata.permissions().mode() & 0o077 != 0 {
-        return Err(RpcError::invalid_input(
-            method,
-            "file permissions must deny group and other access",
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn validate_private_permissions(
-    _metadata: &fs::Metadata,
-    method: &'static str,
-) -> Result<(), RpcError> {
-    Err(RpcError::invalid_input(
-        method,
-        "secure fleet persistence requires Unix",
-    ))
-}
-
-fn sync_directory(path: &Path, method: &'static str) -> Result<(), RpcError> {
-    File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| {
-            RpcError::invalid_input(method, format!("cannot synchronize directory: {error}"))
-        })
 }
 
 #[cfg(test)]

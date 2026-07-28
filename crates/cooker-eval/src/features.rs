@@ -58,11 +58,6 @@ impl FeatureSet {
     pub fn is_empty(&self) -> bool {
         self.agents.is_empty()
     }
-
-    /// Stable ordered agent identifiers.
-    pub fn agent_ids(&self) -> impl Iterator<Item = AgentId> + '_ {
-        self.agents.keys().copied()
-    }
 }
 
 #[derive(Clone, Debug, Default)]

@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::{io, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{io, str::FromStr, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use cooker_core::{
@@ -10,9 +10,8 @@ use cooker_core::{
     ConfirmationStatus, CookerError, PlannedAction, RunId,
 };
 use cooker_solana::{
-    LocalKeypair, NativeTransferAdapter, RpcEndpoint, SignedWireTransaction, SolanaGateway,
-    SplTransferAdapter, TransactionRecord, build_signed_transaction,
-    build_signed_transaction_with_signers,
+    LocalKeypair, NativeTransferAdapter, SignedWireTransaction, SolanaGateway, SplTransferAdapter,
+    TransactionRecord, build_signed_transaction, build_signed_transaction_with_signers,
 };
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
@@ -20,6 +19,10 @@ use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
+
+mod common;
+
+use common::{live_context, sanitize_signature, transaction_native_balances};
 use solana_system_interface::instruction as system_instruction;
 use spl_associated_token_account_interface::{
     address::get_associated_token_address, instruction::create_associated_token_account_idempotent,
@@ -33,7 +36,8 @@ use tokio::time::{Instant, sleep};
 #[tokio::test]
 #[ignore = "requires scripts/surfpool-start.sh and the harness-funded local keypair"]
 async fn native_adapter_accepts_on_real_surfpool() -> Result<(), Box<dyn std::error::Error>> {
-    let (gateway, local_signer) = live_resources().await?;
+    let live = live_context().await?;
+    let (gateway, local_signer) = (live.gateway, live.signer);
     let destination = Keypair::new().pubkey();
     let run_id = RunId::new();
     let agent_id = AgentId::new();
@@ -114,40 +118,6 @@ async fn native_adapter_accepts_on_real_surfpool() -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-fn transaction_native_balances(
-    record: &TransactionRecord,
-    address: &Pubkey,
-    label: &str,
-) -> Result<(u64, u64), io::Error> {
-    let index = record
-        .account_keys
-        .iter()
-        .position(|candidate| candidate == address)
-        .ok_or_else(|| io::Error::other(format!("{label} missing from transaction accounts")))?;
-    let before = record
-        .pre_balances
-        .get(index)
-        .copied()
-        .ok_or_else(|| io::Error::other(format!("{label} pre-balance missing")))?;
-    let after = record
-        .post_balances
-        .get(index)
-        .copied()
-        .ok_or_else(|| io::Error::other(format!("{label} post-balance missing")))?;
-    Ok((before, after))
-}
-
-fn sanitize_signature(signature: &str) -> String {
-    if signature.len() <= 20 {
-        return signature.to_owned();
-    }
-    format!(
-        "{}...{}",
-        &signature[..10],
-        &signature[signature.len() - 10..]
-    )
-}
-
 #[tokio::test]
 #[ignore = "requires scripts/surfpool-start.sh and the harness-funded local keypair"]
 #[allow(clippy::too_many_lines)]
@@ -157,7 +127,8 @@ async fn spl_adapter_accepts_created_mint_on_real_surfpool()
     const INITIAL_SUPPLY: u64 = 25_000_000;
     const TRANSFER_AMOUNT: u64 = 7_500_000;
 
-    let (gateway, local_signer) = live_resources().await?;
+    let live = live_context().await?;
+    let (gateway, local_signer) = (live.gateway, live.signer);
     let payer = local_signer.pubkey();
     let mint_keypair = Keypair::new();
     let mint = mint_keypair.pubkey();
@@ -266,21 +237,6 @@ async fn spl_adapter_accepts_created_mint_on_real_surfpool()
         destination_account.lamports
     );
     Ok(())
-}
-
-async fn live_resources()
--> Result<(Arc<SolanaGateway>, Arc<LocalKeypair>), Box<dyn std::error::Error>> {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let rpc_url =
-        std::env::var("COOKER_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8899".to_owned());
-    let signer_path = std::env::var_os("COOKER_SIGNER_PATH").map_or_else(
-        || project_root.join(".surfpool/keys/funder.json"),
-        PathBuf::from,
-    );
-    let endpoint: RpcEndpoint = rpc_url.parse()?;
-    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
-    let local_signer = Arc::new(LocalKeypair::load(&project_root, signer_path)?);
-    Ok((gateway, local_signer))
 }
 
 async fn signed_setup_transaction(

@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::{io, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{io, str::FromStr, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use cooker_core::{
@@ -10,8 +10,7 @@ use cooker_core::{
     ConfirmationStatus, CookerError, PlannedAction, RunId,
 };
 use cooker_solana::{
-    LocalKeypair, NativeTransferAdapter, RpcEndpoint, RpcFailureClass, SolanaGateway,
-    build_signed_transaction,
+    NativeTransferAdapter, RpcEndpoint, RpcFailureClass, SolanaGateway, build_signed_transaction,
 };
 use reqwest::{Client, redirect::Policy as RedirectPolicy};
 use serde_json::{Value, json};
@@ -28,8 +27,13 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+mod common;
+
+use common::{advance_past_block_height, live_context, sanitize_signature};
+
 const MAX_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 const MAX_FEE_LAMPORTS: u64 = 100_000;
+const MAX_EXPIRY_SLOT_ADVANCE: u64 = 200;
 
 #[tokio::test]
 #[ignore = "requires scripts/surfpool-start.sh and the harness-funded local keypair"]
@@ -39,7 +43,8 @@ const MAX_FEE_LAMPORTS: u64 = 100_000;
 )]
 async fn stale_insufficient_simulation_and_lost_response_reconcile_on_surfpool()
 -> Result<(), Box<dyn std::error::Error>> {
-    let (gateway, signer, direct_context) = live_context().await?;
+    let live = live_context().await?;
+    let (gateway, signer, direct_context) = (live.gateway, live.signer, live.context);
     let payer = signer.pubkey();
 
     let balance = gateway.balance(&payer).await?;
@@ -72,8 +77,12 @@ async fn stale_insufficient_simulation_and_lost_response_reconcile_on_surfpool()
         gateway.latest_blockhash().await?,
     )?;
     let block_height_before_expiry = gateway.block_height().await?;
-    let expiry_clock_steps =
-        advance_past_block_height(&gateway, stale_wire.last_valid_block_height).await?;
+    let expiry_clock_steps = advance_past_block_height(
+        &gateway,
+        stale_wire.last_valid_block_height,
+        MAX_EXPIRY_SLOT_ADVANCE,
+    )
+    .await?;
     let block_height_after_expiry = gateway.block_height().await?;
     assert!(block_height_after_expiry > stale_wire.last_valid_block_height);
     let stale_simulation = gateway.simulate(&stale_wire.bytes).await?;
@@ -181,38 +190,6 @@ async fn stale_insufficient_simulation_and_lost_response_reconcile_on_surfpool()
     Ok(())
 }
 
-fn sanitize_signature(signature: &impl ToString) -> String {
-    let signature = signature.to_string();
-    if signature.len() <= 20 {
-        return signature;
-    }
-    format!(
-        "{}...{}",
-        &signature[..10],
-        &signature[signature.len() - 10..]
-    )
-}
-
-async fn live_context()
--> Result<(Arc<SolanaGateway>, Arc<LocalKeypair>, AdapterContext), Box<dyn std::error::Error>> {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let rpc_url =
-        std::env::var("COOKER_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8899".to_owned());
-    let signer_path = std::env::var_os("COOKER_SIGNER_PATH").map_or_else(
-        || project_root.join(".surfpool/keys/funder.json"),
-        PathBuf::from,
-    );
-    let endpoint: RpcEndpoint = rpc_url.parse()?;
-    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
-    let signer = Arc::new(LocalKeypair::load(&project_root, signer_path)?);
-    let context = AdapterContext {
-        rpc_url: gateway.endpoint().as_url().clone(),
-        signer: signer.pubkey().to_string(),
-        confirmation_timeout: Duration::from_secs(20),
-    };
-    Ok((gateway, signer, context))
-}
-
 fn native_action(destination: Pubkey, lamports: u64) -> PlannedAction {
     let now = Utc::now();
     let run_id = RunId::new();
@@ -244,31 +221,6 @@ async fn count_local_signature(
         .iter()
         .filter(|record| record.signature == signature)
         .count())
-}
-
-async fn advance_past_block_height(
-    gateway: &SolanaGateway,
-    target: u64,
-) -> Result<u64, Box<dyn std::error::Error>> {
-    let mut submitted = 0_u64;
-    while gateway.block_height().await? <= target {
-        if submitted >= 200 {
-            return Err(
-                io::Error::other("Surfpool did not expire blockhash within 200 blocks").into(),
-            );
-        }
-        let current = gateway.epoch_info().await?;
-        gateway
-            .time_travel_to_slot(
-                current
-                    .absolute_slot
-                    .checked_add(1)
-                    .ok_or_else(|| io::Error::other("absolute slot overflowed"))?,
-            )
-            .await?;
-        submitted += 1;
-    }
-    Ok(submitted)
 }
 
 async fn spawn_loss_proxy(

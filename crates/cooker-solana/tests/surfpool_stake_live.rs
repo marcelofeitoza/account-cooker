@@ -4,7 +4,7 @@
 
 use std::{
     io,
-    path::{Path, PathBuf},
+    path::Path,
     process::Command,
     str::FromStr,
     sync::Arc,
@@ -16,9 +16,7 @@ use cooker_core::{
     ActionAdapter, ActionId, ActionPayload, AdapterContext, AgentId, ChainGateway, ChainReceipt,
     ConfirmationStatus, PlannedAction, PreparedAction, RunId, StakeOperation,
 };
-use cooker_solana::{
-    LocalKeypair, NativeStakeAdapter, RpcEndpoint, SolanaGateway, TransactionRecord,
-};
+use cooker_solana::{NativeStakeAdapter, SolanaGateway, TransactionRecord};
 use serde_json::json;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -27,6 +25,10 @@ use solana_stake_interface::{
     state::{Authorized, StakeStateV2},
 };
 use tokio::time::sleep;
+
+mod common;
+
+use common::{live_context, sanitize_signature};
 
 const MAX_FEE_LAMPORTS: u64 = 100_000;
 const VOTE_PROGRAM_ID: Pubkey =
@@ -40,7 +42,9 @@ const VOTE_PROGRAM_ID: Pubkey =
 )]
 async fn native_stake_full_lifecycle_on_real_surfpool() -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
-    let (gateway, signer, signer_path, context) = live_context().await?;
+    let live = live_context().await?;
+    let (gateway, signer, signer_path, context) =
+        (live.gateway, live.signer, live.signer_path, live.context);
     let payer = signer.pubkey();
     let listed_vote_accounts = gateway.active_vote_accounts().await?;
     let (vote, vote_setup_signature) =
@@ -307,45 +311,6 @@ fn assert_fee_within_policy(fee_lamports: u64) {
         fee_lamports <= MAX_FEE_LAMPORTS,
         "recorded fee {fee_lamports} exceeds the action policy ceiling {MAX_FEE_LAMPORTS}"
     );
-}
-
-fn sanitize_signature(signature: &impl ToString) -> String {
-    let signature = signature.to_string();
-    if signature.len() <= 20 {
-        return signature;
-    }
-    format!(
-        "{}...{}",
-        &signature[..10],
-        &signature[signature.len() - 10..]
-    )
-}
-
-async fn live_context() -> Result<
-    (
-        Arc<SolanaGateway>,
-        Arc<LocalKeypair>,
-        PathBuf,
-        AdapterContext,
-    ),
-    Box<dyn std::error::Error>,
-> {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let rpc_url =
-        std::env::var("COOKER_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8899".to_owned());
-    let signer_path = std::env::var_os("COOKER_SIGNER_PATH").map_or_else(
-        || project_root.join(".surfpool/keys/funder.json"),
-        PathBuf::from,
-    );
-    let endpoint: RpcEndpoint = rpc_url.parse()?;
-    let gateway = Arc::new(SolanaGateway::connect(endpoint).await?);
-    let signer = Arc::new(LocalKeypair::load(&project_root, &signer_path)?);
-    let context = AdapterContext {
-        rpc_url: gateway.endpoint().as_url().clone(),
-        signer: signer.pubkey().to_string(),
-        confirmation_timeout: Duration::from_secs(20),
-    };
-    Ok((gateway, signer, signer_path, context))
 }
 
 fn create_local_vote_account(

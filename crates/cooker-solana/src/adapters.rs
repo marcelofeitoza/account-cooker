@@ -1,16 +1,14 @@
 //! Native SOL and classic SPL Token action adapters.
 
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc};
 
 use cooker_core::{
-    ActionAdapter, ActionPayload, AdapterContext, ChainGateway, ChainReceipt, ConfirmationStatus,
-    CookerError, PlannedAction, PreparedAction, StateExpectation,
+    ActionAdapter, ActionPayload, AdapterContext, ChainReceipt, ConfirmationStatus, CookerError,
+    PlannedAction, PreparedAction, StateExpectation,
 };
 use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
 use solana_system_interface::instruction as system_instruction;
-use solana_transaction::Transaction;
 use spl_associated_token_account_interface::{
     address::get_associated_token_address, instruction::create_associated_token_account_idempotent,
 };
@@ -18,20 +16,15 @@ use spl_token_interface::{
     instruction::transfer_checked,
     state::{Account as TokenAccount, Mint},
 };
-use tokio::time::{Instant, sleep};
 
 use crate::{
-    AccountInfo, LocalKeypair, SignedWireTransaction, SolanaGateway, build_signed_transaction,
+    AccountInfo, LocalKeypair, SolanaGateway,
+    adapter_support::{
+        attribute_u64, confirmed_record, find_expectation, observe_until_terminal, parse_pubkey,
+        prepared_action, transaction_native_balances, validate_context, validate_prepared,
+    },
+    build_signed_transaction,
 };
-
-const OBSERVATION_POLL_INTERVAL: Duration = Duration::from_millis(200);
-/// Confirmation polling interval for a shared public endpoint.
-///
-/// A public cluster produces a block roughly every 400 ms and publishes a per-method request
-/// ceiling, so a 200 ms poll would spend the whole budget on status reads that cannot yet have
-/// changed. Status polling is the single largest consumer of that budget across a fleet, so
-/// this is set well above block time.
-const PUBLIC_CLUSTER_OBSERVATION_POLL_INTERVAL: Duration = Duration::from_millis(2_500);
 const NATIVE_DESTINATION_KIND: &str = "native_destination_balance_delta";
 const NATIVE_SOURCE_KIND: &str = "native_source_balance_delta";
 const SPL_DESTINATION_KIND: &str = "spl_destination_balance_delta";
@@ -145,7 +138,7 @@ impl ActionAdapter for NativeTransferAdapter {
         prepared: &PreparedAction,
     ) -> Result<ChainReceipt, CookerError> {
         validate_context(context, &self.gateway, &self.signer)?;
-        validate_prepared(action, prepared, &self.signer)?;
+        validate_prepared(action, prepared, &self.signer, "native")?;
         let ActionPayload::NativeTransfer {
             destination,
             lamports,
@@ -160,7 +153,7 @@ impl ActionAdapter for NativeTransferAdapter {
             return Ok(receipt);
         }
 
-        let record = confirmed_record(&self.gateway, prepared).await?;
+        let record = confirmed_record(&self.gateway, prepared, "native").await?;
         let source_expected = find_expectation(prepared, NATIVE_SOURCE_KIND, &source)?;
         let destination_expected =
             find_expectation(prepared, NATIVE_DESTINATION_KIND, &destination)?;
@@ -364,7 +357,7 @@ impl ActionAdapter for SplTransferAdapter {
         prepared: &PreparedAction,
     ) -> Result<ChainReceipt, CookerError> {
         validate_context(context, &self.gateway, &self.signer)?;
-        validate_prepared(action, prepared, &self.signer)?;
+        validate_prepared(action, prepared, &self.signer, "SPL")?;
         let ActionPayload::SplTransfer {
             mint,
             destination_owner,
@@ -383,7 +376,7 @@ impl ActionAdapter for SplTransferAdapter {
             return Ok(receipt);
         }
 
-        let record = confirmed_record(&self.gateway, prepared).await?;
+        let record = confirmed_record(&self.gateway, prepared, "SPL").await?;
         let source_expected = find_expectation(prepared, SPL_SOURCE_KIND, &source)?;
         let destination_expected = find_expectation(prepared, SPL_DESTINATION_KIND, &destination)?;
         let native_expected = find_expectation(prepared, SPL_NATIVE_OVERHEAD_KIND, &signer)?;
@@ -479,120 +472,6 @@ impl ActionAdapter for SplTransferAdapter {
     }
 }
 
-fn validate_context(
-    context: &AdapterContext,
-    gateway: &SolanaGateway,
-    signer: &LocalKeypair,
-) -> Result<(), CookerError> {
-    if &context.rpc_url != gateway.endpoint().as_url() {
-        return Err(CookerError::InvalidConfig(
-            "adapter context RPC differs from the verified gateway endpoint".to_owned(),
-        ));
-    }
-    let context_signer = Pubkey::from_str(&context.signer).map_err(|error| {
-        CookerError::InvalidConfig(format!("adapter context signer is invalid: {error}"))
-    })?;
-    if context_signer != signer.pubkey() {
-        return Err(CookerError::InvalidConfig(
-            "adapter context signer differs from the loaded local keypair".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_prepared(
-    action: &PlannedAction,
-    prepared: &PreparedAction,
-    signer: &LocalKeypair,
-) -> Result<(), CookerError> {
-    if prepared.action_id != action.id {
-        return Err(CookerError::Codec(
-            "prepared transaction belongs to another action".to_owned(),
-        ));
-    }
-    let expected_signature = Signature::from_str(&prepared.signature)
-        .map_err(|error| CookerError::Codec(format!("invalid prepared signature: {error}")))?;
-    let transaction: Transaction = bincode::deserialize(&prepared.transaction)
-        .map_err(|error| CookerError::Codec(format!("invalid prepared transaction: {error}")))?;
-    if transaction.signatures.first() != Some(&expected_signature)
-        || transaction.message.recent_blockhash.to_string() != prepared.recent_blockhash
-        || transaction.message.account_keys.first() != Some(&signer.pubkey())
-        || !expected_signature.verify(signer.pubkey().as_ref(), &transaction.message_data())
-    {
-        return Err(CookerError::Codec(
-            "prepared transaction metadata or signature is inconsistent".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-async fn observe_until_terminal(
-    gateway: &SolanaGateway,
-    context: &AdapterContext,
-    prepared: &PreparedAction,
-) -> Result<ChainReceipt, CookerError> {
-    let started = Instant::now();
-    let poll_interval = if gateway.endpoint().is_public_cluster() {
-        PUBLIC_CLUSTER_OBSERVATION_POLL_INTERVAL
-    } else {
-        OBSERVATION_POLL_INTERVAL
-    };
-    loop {
-        let receipt =
-            ChainGateway::observe(gateway, &prepared.action_id, &prepared.signature).await?;
-        if matches!(
-            receipt.status,
-            ConfirmationStatus::Confirmed
-                | ConfirmationStatus::Finalized
-                | ConfirmationStatus::Failed
-        ) {
-            return Ok(receipt);
-        }
-        if receipt.status == ConfirmationStatus::Missing
-            && gateway.block_height().await? > prepared.last_valid_block_height
-        {
-            return Ok(receipt);
-        }
-        let elapsed = started.elapsed();
-        if elapsed >= context.confirmation_timeout {
-            return Ok(receipt);
-        }
-        sleep(poll_interval.min(context.confirmation_timeout.saturating_sub(elapsed))).await;
-    }
-}
-
-async fn confirmed_record(
-    gateway: &SolanaGateway,
-    prepared: &PreparedAction,
-) -> Result<crate::TransactionRecord, CookerError> {
-    let signature = Signature::from_str(&prepared.signature)
-        .map_err(|error| CookerError::Codec(format!("invalid prepared signature: {error}")))?;
-    gateway.transaction(&signature).await?.ok_or_else(|| {
-        CookerError::Chain("confirmed signature had no transaction metadata".to_owned())
-    })
-}
-
-fn transaction_native_balances(
-    record: &crate::TransactionRecord,
-    account: &Pubkey,
-    label: &str,
-) -> Result<(u64, u64), CookerError> {
-    let index = record
-        .account_keys
-        .iter()
-        .position(|candidate| candidate == account)
-        .ok_or_else(|| {
-            CookerError::Codec(format!("transaction metadata omitted {label} account"))
-        })?;
-    let before = *record.pre_balances.get(index).ok_or_else(|| {
-        CookerError::Codec(format!("transaction metadata omitted {label} pre-balance"))
-    })?;
-    let after = *record.post_balances.get(index).ok_or_else(|| {
-        CookerError::Codec(format!("transaction metadata omitted {label} post-balance"))
-    })?;
-    Ok((before, after))
-}
-
 async fn required_account(
     gateway: &SolanaGateway,
     address: &Pubkey,
@@ -644,21 +523,6 @@ fn unpack_token_account(
         )));
     }
     Ok(token)
-}
-
-fn prepared_action(
-    action: &PlannedAction,
-    signed: SignedWireTransaction,
-    expectations: Vec<StateExpectation>,
-) -> PreparedAction {
-    PreparedAction {
-        action_id: action.id.clone(),
-        signature: signed.signature.to_string(),
-        transaction: signed.bytes,
-        recent_blockhash: signed.recent_blockhash,
-        last_valid_block_height: signed.last_valid_block_height,
-        expectations,
-    }
 }
 
 fn native_expectation(
@@ -725,31 +589,6 @@ fn spl_native_overhead_expectation(
             ),
         ]),
     }
-}
-
-fn find_expectation<'a>(
-    prepared: &'a PreparedAction,
-    kind: &str,
-    account: &Pubkey,
-) -> Result<&'a StateExpectation, CookerError> {
-    prepared
-        .expectations
-        .iter()
-        .find(|expectation| expectation.kind == kind && expectation.account == account.to_string())
-        .ok_or_else(|| {
-            CookerError::Codec(format!(
-                "prepared transaction omitted {kind} expectation for {account}"
-            ))
-        })
-}
-
-fn attribute_u64(expectation: &StateExpectation, key: &str) -> Result<u64, CookerError> {
-    expectation
-        .attributes
-        .get(key)
-        .ok_or_else(|| CookerError::Codec(format!("expectation omitted {key}")))?
-        .parse()
-        .map_err(|error| CookerError::Codec(format!("invalid expectation {key}: {error}")))
 }
 
 fn attribute_u8(expectation: &StateExpectation, key: &str) -> Result<u8, CookerError> {
@@ -945,10 +784,6 @@ fn required_token_balance<'a>(
     balance.ok_or_else(|| CookerError::Codec(format!("transaction metadata omitted {label}")))
 }
 
-fn parse_pubkey(value: &str, label: &str) -> Result<Pubkey, CookerError> {
-    Pubkey::from_str(value).map_err(|error| CookerError::Codec(format!("invalid {label}: {error}")))
-}
-
 fn unsupported_action(expected: &str) -> CookerError {
     CookerError::Policy(format!("adapter expected {expected}"))
 }
@@ -964,6 +799,7 @@ const fn is_success_status(status: ConfirmationStatus) -> bool {
 mod tests {
     use solana_hash::Hash;
     use solana_keypair::Keypair;
+    use solana_signature::Signature;
 
     use super::*;
     use crate::LatestBlockhash;
@@ -993,7 +829,7 @@ mod tests {
         let mut prepared = prepared_action(&action, wire_transaction, Vec::new());
         prepared.signature = Signature::default().to_string();
 
-        assert!(validate_prepared(&action, &prepared, &local_signer).is_err());
+        assert!(validate_prepared(&action, &prepared, &local_signer, "native").is_err());
         Ok(())
     }
 

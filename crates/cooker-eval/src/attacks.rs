@@ -34,6 +34,22 @@ pub enum FeatureFamily {
     BalanceRank,
 }
 
+impl FeatureFamily {
+    /// Every family, in the fixed order every per-family report uses.
+    pub const ALL: [Self; 10] = [
+        Self::Timing,
+        Self::Amount,
+        Self::Sequence,
+        Self::Destination,
+        Self::Synchrony,
+        Self::Funding,
+        Self::FundingRound,
+        Self::FundingBatch,
+        Self::Route,
+        Self::BalanceRank,
+    ];
+}
+
 /// Fixed composite weights selected without evaluation labels.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AttackWeights {

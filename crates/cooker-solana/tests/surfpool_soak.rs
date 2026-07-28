@@ -4,39 +4,48 @@
 #![recursion_limit = "256"]
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fs, io,
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use chrono::{TimeDelta, Utc};
 use cooker_core::{
-    ActionAdapter, ActionId, ActionKind, ActionPayload, ActionState, AdapterContext, AgentId,
-    BudgetConfig, ChainGateway, ChainReceipt, Clock, CookerError, PlannedAction, Policy,
-    PolicyConfig, RunId, SafetyPolicy, SimulationReceipt, StateStore, SystemClock,
+    ActionId, ActionPayload, ActionState, ChainGateway, ChainReceipt, CookerError, RunId,
+    SimulationReceipt, StateStore,
 };
-use cooker_runtime::{
-    ExecutionCheckpoint, ExecutionResult, FaultInjector, NoFaults, RuntimeEngine, RuntimeSettings,
-};
-use cooker_solana::{LocalKeypair, NativeTransferAdapter, RpcEndpoint, SolanaGateway};
+use cooker_runtime::{ExecutionResult, NoFaults};
+use cooker_solana::{LocalKeypair, RpcEndpoint, SolanaGateway};
 use cooker_store::{RunRegistration, Store, StoreIdentity};
 use serde_json::json;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use tokio::sync::watch;
 
+mod common;
+
+use common::{
+    LoseOneSendResponse, NativeSoakParams, env_usize, native_transfer_runtime,
+    planned_native_actions, sanitize_signature, write_json,
+};
+
 const DEFAULT_TRANSACTION_COUNT: usize = 1_000;
 const TRANSFER_LAMPORTS: u64 = 1_000_000;
 const MAX_FEE_LAMPORTS: u64 = 10_000;
 const MODEL_VERSION: &str = "surfpool-compressed-soak-v1";
 const SIGNATURE_SAMPLE_LIMIT: usize = 12;
+const SOAK: NativeSoakParams = NativeSoakParams {
+    model_version: MODEL_VERSION,
+    transfer_lamports: TRANSFER_LAMPORTS,
+    max_fee_lamports: MAX_FEE_LAMPORTS,
+    reserve_lamports: 100_000_000,
+    confirmation_timeout: Duration::from_secs(20),
+    max_concurrency: 1,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PersistentSurfpoolIdentity {
@@ -69,24 +78,6 @@ struct SurfpoolSession {
 struct SurfpoolRestartProvenance {
     before: SurfpoolSession,
     after: SurfpoolSession,
-}
-
-#[derive(Debug, Default)]
-struct LoseOneSendResponse {
-    triggered: AtomicBool,
-}
-
-impl FaultInjector for LoseOneSendResponse {
-    fn check(&self, checkpoint: ExecutionCheckpoint) -> Result<(), CookerError> {
-        if checkpoint == ExecutionCheckpoint::AfterSendResponseLost
-            && !self.triggered.swap(true, Ordering::SeqCst)
-        {
-            return Err(CookerError::Chain(
-                "injected Surfpool send-response loss".to_owned(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
@@ -210,7 +201,13 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
 
     let run_id = RunId::new();
     let scheduled_at = Utc::now();
-    let actions = planned_actions(run_id, scheduled_at, transaction_count);
+    let actions = planned_native_actions(
+        run_id,
+        scheduled_at,
+        transaction_count,
+        SOAK,
+        deterministic_destination,
+    );
     let destinations: BTreeSet<String> = actions
         .iter()
         .filter_map(|action| match &action.payload {
@@ -252,15 +249,20 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     }
     assert_eq!(idempotent_enqueue_rejections, transaction_count);
 
-    let loss = Arc::new(LoseOneSendResponse::default());
-    let first_runtime = runtime(
+    let loss = Arc::new(LoseOneSendResponse::new(
+        "injected Surfpool send-response loss",
+    ));
+    let first_runtime = native_transfer_runtime(
         Arc::clone(&store),
-        Arc::clone(&gateway),
+        &gateway,
+        Arc::new(ConfirmSubmissionGateway::new(Arc::clone(&gateway))),
         Arc::clone(&signer),
         &destinations,
-        max_concurrency,
+        NativeSoakParams {
+            max_concurrency,
+            ..SOAK
+        },
         loss.clone(),
-        true,
     )?;
     let first_batch_size = (transaction_count / 2).max(1);
     let first_claimed = store.claim_due_actions(
@@ -280,7 +282,7 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
         first_summary.confirmed + first_summary.unknown,
         first_batch_size
     );
-    assert!(loss.triggered.load(Ordering::SeqCst));
+    assert!(loss.triggered());
 
     // Discard the runtime, store, signer, and gateway handles, then reconstruct them inside the
     // same test process from the persistent SQLite database and local signer file.
@@ -346,14 +348,17 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
         StoreIdentity::surfpool(&surfnet_id)?,
     )?);
     store.verify_integrity()?;
-    let second_runtime = runtime(
+    let second_runtime = native_transfer_runtime(
         Arc::clone(&store),
-        Arc::clone(&gateway),
+        &gateway,
+        Arc::<SolanaGateway>::clone(&gateway),
         Arc::clone(&signer),
         &destinations,
-        max_concurrency,
+        NativeSoakParams {
+            max_concurrency,
+            ..SOAK
+        },
         Arc::new(NoFaults),
-        false,
     )?;
     let second_claimed = store.claim_due_actions(
         "soak-after-restart",
@@ -648,116 +653,11 @@ async fn compressed_soak_restarts_and_reconciles_without_duplicate_intents()
     Ok(())
 }
 
-fn planned_actions(
-    run_id: RunId,
-    scheduled_at: chrono::DateTime<Utc>,
-    count: usize,
-) -> Vec<PlannedAction> {
-    (0..count)
-        .map(|index| {
-            let agent_id = AgentId::new();
-            let sequence = u64::try_from(index).unwrap_or(u64::MAX);
-            let destination = deterministic_destination(sequence);
-            PlannedAction {
-                id: ActionId::derive(run_id, agent_id, sequence, MODEL_VERSION),
-                run_id,
-                agent_id,
-                sequence,
-                model_version: MODEL_VERSION.to_owned(),
-                scheduled_at,
-                payload: ActionPayload::NativeTransfer {
-                    destination: destination.to_string(),
-                    lamports: TRANSFER_LAMPORTS,
-                },
-                max_fee_lamports: MAX_FEE_LAMPORTS,
-                max_account_creation_lamports: 0,
-                created_at: scheduled_at,
-            }
-        })
-        .collect()
-}
-
 fn deterministic_destination(sequence: u64) -> Pubkey {
     let mut bytes = [0_u8; 32];
     bytes[..16].copy_from_slice(b"noise-soak-v1!!!");
     bytes[24..].copy_from_slice(&sequence.to_le_bytes());
     Pubkey::new_from_array(bytes)
-}
-
-fn runtime(
-    store: Arc<Store>,
-    gateway: Arc<SolanaGateway>,
-    signer: Arc<LocalKeypair>,
-    destinations: &BTreeSet<String>,
-    max_concurrency: usize,
-    faults: Arc<dyn FaultInjector>,
-    confirm_first_submission: bool,
-) -> Result<Arc<RuntimeEngine>, CookerError> {
-    let total_budget = u64::try_from(destinations.len())
-        .unwrap_or(u64::MAX)
-        .saturating_mul(TRANSFER_LAMPORTS + MAX_FEE_LAMPORTS);
-    let policy: Arc<dyn Policy> = Arc::new(SafetyPolicy::new(PolicyConfig {
-        budgets: BudgetConfig {
-            daily_lamports: total_budget,
-            lifetime_lamports: total_budget,
-            reserve_lamports: 100_000_000,
-            max_fee_lamports: MAX_FEE_LAMPORTS,
-            max_account_creation_lamports: 0,
-        },
-        allowed_actions: [ActionKind::NativeTransfer].into_iter().collect(),
-        max_action_amounts: BTreeMap::from([(ActionKind::NativeTransfer, TRANSFER_LAMPORTS)]),
-        allowed_destinations: destinations.clone(),
-        allowed_mints: BTreeSet::new(),
-        native_input_mints: BTreeSet::new(),
-        max_slippage_bps: 0,
-    })?);
-    let context = AdapterContext {
-        rpc_url: gateway.endpoint().as_url().clone(),
-        signer: signer.pubkey().to_string(),
-        confirmation_timeout: Duration::from_secs(20),
-    };
-    let adapter: Arc<dyn ActionAdapter> =
-        Arc::new(NativeTransferAdapter::new(Arc::clone(&gateway), signer));
-    let store_trait: Arc<dyn StateStore> = store;
-    let gateway_trait: Arc<dyn ChainGateway> = if confirm_first_submission {
-        Arc::new(ConfirmSubmissionGateway::new(gateway))
-    } else {
-        gateway
-    };
-    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    Ok(Arc::new(RuntimeEngine::new(
-        store_trait,
-        gateway_trait,
-        policy,
-        [(ActionKind::NativeTransfer, adapter)],
-        RuntimeSettings {
-            adapter_context: context,
-            max_concurrency,
-        },
-        faults,
-        clock,
-    )?))
-}
-
-fn env_usize(name: &str, default: usize) -> Result<usize, Box<dyn std::error::Error>> {
-    std::env::var(name).map_or(Ok(default), |value| {
-        let parsed = value.parse::<usize>()?;
-        if parsed == 0 {
-            return Err(io::Error::other(format!("{name} must be positive")).into());
-        }
-        Ok(parsed)
-    })
-}
-
-fn sanitize_signature(signature: &str) -> String {
-    if signature.len() <= 20 {
-        return signature.to_owned();
-    }
-    format!(
-        "{}...{}",
-        &signature[..10],
-        &signature[signature.len() - 10..]
-    )
 }
 
 fn read_surfpool_session(path: &Path) -> Result<SurfpoolSession, Box<dyn std::error::Error>> {
@@ -850,17 +750,5 @@ fn restart_surfpool(project_root: &Path) -> Result<(), Box<dyn std::error::Error
             .into());
         }
     }
-    Ok(())
-}
-
-fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temporary = path.with_extension("json.tmp");
-    let mut bytes = serde_json::to_vec_pretty(value)?;
-    bytes.push(b'\n');
-    fs::write(&temporary, bytes)?;
-    fs::rename(temporary, path)?;
     Ok(())
 }
