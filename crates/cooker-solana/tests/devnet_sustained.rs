@@ -364,7 +364,8 @@ async fn sustained_devnet_run_holds_engine_invariants_across_hours()
     let mut stop_reason = "plan_completed";
     let mut payer_latest = payer_before;
 
-    // The pool round creates every destination once; the remaining rounds reuse them.
+    // The pool round funds every destination with one rent-exempt minimum, creating it when
+    // it does not exist yet; the remaining rounds reuse those destinations.
     let total_rounds = steady_rounds
         .checked_add(1)
         .ok_or_else(|| io::Error::other("sustained round count overflowed"))?;
@@ -506,7 +507,7 @@ async fn sustained_devnet_run_holds_engine_invariants_across_hours()
         rounds_completed += 1;
         let round_json = json!({
             "round": round,
-            "phase": if round == 0 { "pool_creation" } else { "steady_state" },
+            "phase": if round == 0 { "pool_funding" } else { "steady_state" },
             "started_at": round_started_at.to_rfc3339(),
             "finished_at": Utc::now().to_rfc3339(),
             "execution_ms": execution_ms,
@@ -689,7 +690,7 @@ async fn sustained_devnet_run_holds_engine_invariants_across_hours()
     assert_eq!(tally.exact_source_debits, tally.confirmed);
     assert_eq!(tally.exact_destination_credits, tally.confirmed);
     assert!(tally.events > 0);
-    assert!(peak_workers <= round_batch.max(pool_size));
+    assert!(peak_workers <= round_batch);
 
     let payer_after = gateway.balance(&payer).await?;
     let epoch_after = gateway.epoch_info().await?;
@@ -907,7 +908,7 @@ fn aggregate(input: &AggregateInput<'_>, accumulator: &Accumulator, rounds: &[Va
         "rounds_completed": input.rounds_completed,
         "planned_action_count": input.planned_count,
         "executed_action_count": tally.executed(),
-        "logical_action_count": accumulator.records.len(),
+        "logical_action_count": input.planned_count,
         "confirmed_action_count": tally.confirmed,
         "failed_action_count": tally.failed,
         "expired_action_count": tally.expired,
@@ -925,7 +926,7 @@ fn aggregate(input: &AggregateInput<'_>, accumulator: &Accumulator, rounds: &[Va
         "unresolved_submitted": tally.unresolved_submitted,
         "unresolved_unknown": tally.unresolved_unknown,
         "worker_errors": input.worker_errors,
-        "max_concurrency": input.round_batch.max(input.pool_size),
+        "max_concurrency": input.round_batch,
         "peak_worker_count": input.peak_workers,
         "reconciliation": {
             "in_round_passes": input.in_round_reconciliation_passes,
