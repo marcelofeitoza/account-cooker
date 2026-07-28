@@ -212,6 +212,9 @@ Report:
 - precision at K;
 - clustering ARI or NMI;
 - common-funder attack separately;
+- payer-and-round and scheme-aware funding attacks separately;
+- every funding scheme against the dedicated-funder baseline under one shared
+  participation schedule;
 - mean, min, max, and per-seed values;
 - action counts and rejected actions;
 - failures and blind spots.
@@ -317,7 +320,7 @@ README, CLI help, architecture, threat model, and evidence must agree on:
 - network restrictions;
 - scale actually tested;
 - metrics actually reported;
-- common-funder limitation;
+- funding-provenance limitation and the schemes it was measured under;
 - safety exclusions;
 - review status.
 

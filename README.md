@@ -29,6 +29,8 @@ privacy hypotheses as plainly as successful ones.
 - A label-isolated adversarial evaluator covering timing, amounts, action sequences,
   synchrony, destinations, balance rank, consolidation, route, fee-payer, and funding
   signals across five fixed seeds and feature ablations.
+- Three funding-provenance schemes measured under identical behavior, budgets, and
+  attacker settings, including a scheme-aware attack that weights small shared batches.
 - Deterministic virtual and real Surfpool soak harnesses plus a sanitized,
   checksum-bearing evidence pack.
 - One opt-in bounded public devnet run with committed, explorer-checkable transaction
@@ -37,9 +39,23 @@ privacy hypotheses as plainly as successful ones.
 ## Claim Boundary
 
 Account Cooker does not provide anonymity, cryptographic unlinkability, transaction
-confidentiality, or protection from RPC/IP correlation. A common funding edge remains
-directly observable. The evaluator measures named synthetic attacker models; it does not
-establish resemblance to the full population of human Solana users.
+confidentiality, or protection from RPC/IP correlation. The evaluator measures named
+synthetic attacker models; it does not establish resemblance to the full population of
+human Solana users.
+
+Funding provenance is now measured rather than conceded. A dedicated per-operator funding
+wallet is perfectly linkable: all three funding attacks score ROC AUC 1.0000 on every seed
+and every planner. Paying the same accounts from a shared pool that uses one uniform
+denomination and mixes each round's recipients across operators drops the same three
+attacks to chance, and the same pool batched per operator does not, which is what isolates
+the mixing rather than the pool as the cause. The measurement covers the disbursement side
+only; deposits into the pool, custody of the pool, and value or count matching across the
+pool boundary are unmeasured, so this does not establish transaction-graph anonymity.
+
+That result is an evaluator measurement, not a shipped capability. The runtime `cooker fund`
+command is unchanged and still pays each account from the operator wallet. No pool, mixer,
+or custodial service is implemented. See
+[the funding-provenance measurement](evidence/funding/README.md).
 
 The project does not implement self-trading, artificial volume, governance voting, referral
 or airdrop farming, NFT manipulation, dust spam, bridge churn, or deceptive multi-hop

@@ -70,7 +70,7 @@ mislabel generated traffic.
 
 | Channel | Visible signal | Implemented treatment |
 |---|---|---|
-| funding | common ancestor, star fan-out | measured; not claimed solved |
+| funding | common ancestor, star fan-out | measured per payer-assignment scheme; see section 7 |
 | fee payer | reused signer or payer | measured and policy-constrained |
 | timing | cadence, time zone, bursts | persona sessions and evaluator |
 | amounts | exact values, roundness, ratios | bounded mixture and evaluator |
@@ -91,7 +91,8 @@ The project does not claim:
 - hiding of funds or transaction contents;
 - resistance to a global passive observer;
 - resistance to RPC or IP correlation;
-- removal of a common-funder graph;
+- removal of the funding graph itself, as opposed to the measured removal of the
+  operator-adjacency signal inside it described in section 7;
 - statistical indistinguishability from all human users;
 - protection from subpoenas, KYC records, or off-chain identity;
 - legal or protocol permission for automated mainnet activity;
@@ -120,20 +121,47 @@ Synthetic correctness and privacy effectiveness are separate:
 - Generated Surfpool traces establish chain fidelity.
 - Neither establishes resemblance to the full population of human Solana users.
 
-## 7. Common-Funder Bound
+## 7. Funding-Provenance Bound
 
 If all wallets receive funds from a labeled operator wallet, the funding graph directly
-links them. Timing and action diversity cannot undo that historical edge.
+links them. Timing and action diversity cannot undo that historical edge. This is the
+baseline condition, and the evaluator measures it at ROC AUC 1.0000 on every seed and
+every planner, under all three funding attacks.
+
+The evaluator also measures what changes that. Three payer-assignment schemes run over one
+shared participation schedule, with identical behavior, budgets, attacker, and threshold,
+so the payer assignment is the only difference between them:
+
+- `dedicated_per_operator`, the baseline star topology above;
+- `pooled_mixed_rounds`, a shared disburser set paying one uniform denomination per
+  transfer, with each round's recipients shuffled together before disbursers are dealt out;
+- `pooled_per_operator_rounds`, the control, which keeps the shared disburser set and the
+  uniform denomination but lets each operator's batch go to a single disburser.
+
+The pooled mixed scheme is built so that no operator grouping can reach the payer
+assignment. Its schedule is a function of account identifiers and a schedule seed only,
+which a unit test enforces by relabelling every operator and requiring the same plan. That
+is why the drop is a structural property and not a tuned parameter.
 
 The implementation therefore:
 
-- measures common funding explicitly;
-- reports results both with and without funding features;
+- measures funding provenance per scheme rather than conceding it;
+- attacks each scheme with common-funder overlap, payer-and-round overlap, and a
+  scheme-aware attack that weights a shared batch by how few accounts were in it;
+- reports composite results both with and without funding features;
+- keeps the control arm, which shows that a shared pool alone does not close the channel;
 - refuses to describe such a fleet as unlinkable;
-- accepts pre-funded test wallets only as a controlled experimental condition;
 - does not create deceptive multi-hop fan-out and call it privacy.
 
-Any future funding backend requires its own threat model and approval.
+What the pooled result does not establish: deposits into the pool, custody of the pool, the
+fleet-level fact that every account appears in the first round, and value or count matching
+across the pool boundary are all outside the observation model. A batch with one recipient
+gives that transfer no cover, and the smallest-batch column reports it.
+
+The scope is the evaluator. `cooker-core::funding` builds the schedules and `cooker-eval`
+measures them. The runtime `cooker fund` path is unchanged and still pays each account from
+the operator wallet. No pool, mixer, or custodial service is implemented, and any real
+funding backend requires its own threat model and approval.
 
 ## 8. Transaction Transparency Bound
 
@@ -225,7 +253,8 @@ Permitted before favorable evaluation:
 - generates policy-constrained account workloads;
 - provides deterministic simulation and Surfpool execution;
 - measures selected wallet-clustering signals;
-- reports common-funder and longitudinal leakage.
+- reports common-funder and longitudinal leakage;
+- reports funding provenance per payer-assignment scheme against a named baseline.
 
 Permitted only after evidence:
 

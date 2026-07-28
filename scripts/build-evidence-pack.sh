@@ -810,9 +810,14 @@ jq -e '
     ($root.config.agents_per_controller - 1) / 2) as $positive_pairs |
   ($agents * $root.config.days * $root.config.events_per_agent_per_day) as $events |
   ["naive_uniform", "independent_weighted", "persona_session"] as $planners |
-  ["amount", "balance_rank", "destination", "funding", "route", "sequence",
-   "synchrony", "timing"] as $features |
+  ["amount", "balance_rank", "destination", "funding", "funding_batch", "funding_round",
+   "route", "sequence", "synchrony", "timing"] as $features |
+  ["dedicated_per_operator", "pooled_mixed_rounds", "pooled_per_operator_rounds"] as $schemes |
   .config.seeds == [11, 23, 37, 51, 71] and
+  .config.funding_schemes == $schemes and
+  .config.funding.disbursers >= 1 and .config.funding.round_hours >= 1 and
+  .config.funding.top_ups_per_account >= 1 and
+  .config.funding.denomination_lamports > 0 and
   .config.controllers > 1 and .config.agents_per_controller > 1 and
   .config.days > 0 and .config.events_per_agent_per_day > 0 and
   (.config.threshold | unit_metric) and
@@ -825,12 +830,20 @@ jq -e '
     {"kind":"without","feature":"funding"}
   ] and
   ([.seeds[].planner] | unique | sort) == ($planners | sort) and
-  (.seeds | length) == (($planners | length) * (.config.seeds | length) * (.config.ablations | length)) and
-  ([.seeds[] | [.planner, (.seed | tostring), (.ablation | tojson)] | join("|")] |
+  ([.seeds[].funding_scheme] | unique | sort) == ($schemes | sort) and
+  (.seeds | length) ==
+    (($schemes | length) * ($planners | length) * (.config.seeds | length) *
+     (.config.ablations | length)) and
+  ([.seeds[] | [.funding_scheme, .planner, (.seed | tostring), (.ablation | tojson)] | join("|")] |
     unique | length) == (.seeds | length) and
   all(.seeds[];
     . as $row |
     ($planners | index($row.planner)) != null and
+    ($schemes | index($row.funding_scheme)) != null and
+    .funding.denomination_lamports == $root.config.funding.denomination_lamports and
+    .funding.transfers > 0 and .funding.funders >= 1 and .funding.rounds >= 1 and
+    .funding.mean_batch_recipients >= 1 and .funding.min_batch_recipients >= 1 and
+    .funding.mean_observed_funders >= 1 and
     ($root.config.seeds | index($row.seed)) != null and
     any($root.config.ablations[]; . == $row.ablation) and
     (.trace_hash | test("^[0-9a-f]{64}$")) and
@@ -868,12 +881,14 @@ jq -e '
       (.separation | cluster_metric) and
       (((.within_controller_mean - .between_controller_mean) - .separation) | fabs)
         < 0.000000000001)) and
-  (.aggregates | length) == (($planners | length) * (.config.ablations | length)) and
-  ([.aggregates[] | [.planner, (.ablation | tojson)] | join("|")] | unique | length)
-    == (.aggregates | length) and
+  (.aggregates | length) ==
+    (($schemes | length) * ($planners | length) * (.config.ablations | length)) and
+  ([.aggregates[] | [.funding_scheme, .planner, (.ablation | tojson)] | join("|")] |
+    unique | length) == (.aggregates | length) and
   all(.aggregates[];
     . as $aggregate |
     ($planners | index($aggregate.planner)) != null and
+    ($schemes | index($aggregate.funding_scheme)) != null and
     any($root.config.ablations[]; . == $aggregate.ablation) and
     (["roc_auc", "f1", "precision_at_k", "adjusted_rand",
       "normalized_mutual_information"] - ($aggregate | keys) | length) == 0 and
@@ -881,25 +896,52 @@ jq -e '
     (.precision_at_k | aggregate_stat) and (.adjusted_rand | aggregate_stat) and
     (.normalized_mutual_information | aggregate_stat) and
     ([ $root.seeds[] |
-       select(.planner == $aggregate.planner and .ablation == $aggregate.ablation) ] | length)
+       select(.funding_scheme == $aggregate.funding_scheme and
+              .planner == $aggregate.planner and .ablation == $aggregate.ablation) ] | length)
       == ($root.config.seeds | length) and
     ((.roc_auc.mean -
-      ([ $root.seeds[] | select(.planner == $aggregate.planner and .ablation == $aggregate.ablation) |
+      ([ $root.seeds[] | select(.funding_scheme == $aggregate.funding_scheme and
+              .planner == $aggregate.planner and .ablation == $aggregate.ablation) |
          .composite.binary.roc_auc ] | add / length)) | fabs) < 0.000000000001 and
     ((.f1.mean -
-      ([ $root.seeds[] | select(.planner == $aggregate.planner and .ablation == $aggregate.ablation) |
+      ([ $root.seeds[] | select(.funding_scheme == $aggregate.funding_scheme and
+              .planner == $aggregate.planner and .ablation == $aggregate.ablation) |
          .composite.binary.f1 ] | add / length)) | fabs) < 0.000000000001 and
     ((.precision_at_k.mean -
-      ([ $root.seeds[] | select(.planner == $aggregate.planner and .ablation == $aggregate.ablation) |
+      ([ $root.seeds[] | select(.funding_scheme == $aggregate.funding_scheme and
+              .planner == $aggregate.planner and .ablation == $aggregate.ablation) |
          .composite.binary.precision_at_k ] | add / length)) | fabs) < 0.000000000001 and
     ((.adjusted_rand.mean -
-      ([ $root.seeds[] | select(.planner == $aggregate.planner and .ablation == $aggregate.ablation) |
+      ([ $root.seeds[] | select(.funding_scheme == $aggregate.funding_scheme and
+              .planner == $aggregate.planner and .ablation == $aggregate.ablation) |
          .composite.clustering.adjusted_rand ] | add / length)) | fabs) < 0.000000000001 and
     ((.normalized_mutual_information.mean -
-      ([ $root.seeds[] | select(.planner == $aggregate.planner and .ablation == $aggregate.ablation) |
+      ([ $root.seeds[] | select(.funding_scheme == $aggregate.funding_scheme and
+              .planner == $aggregate.planner and .ablation == $aggregate.ablation) |
          .composite.clustering.normalized_mutual_information ] | add / length)) | fabs)
       < 0.000000000001) and
-  (.limitation | contains("common-funder graph remains directly observable"))
+  (.funding_summary | length) == (($schemes | length) * ($planners | length)) and
+  ([.funding_summary[] | [.funding_scheme, .planner] | join("|")] | unique | length)
+    == (.funding_summary | length) and
+  all(.funding_summary[];
+    . as $summary |
+    ($schemes | index($summary.funding_scheme)) != null and
+    ($planners | index($summary.planner)) != null and
+    (.funding_roc_auc | aggregate_stat) and (.funding_round_roc_auc | aggregate_stat) and
+    (.funding_batch_roc_auc | aggregate_stat) and
+    (.funding_separation | aggregate_stat) and (.composite_roc_auc | aggregate_stat) and
+    ((.funding_scheme != "dedicated_per_operator") or
+      (((.funding_roc_auc.min - 1) | fabs) < 0.000000000001 and
+       ((.funding_round_roc_auc.min - 1) | fabs) < 0.000000000001 and
+       ((.funding_batch_roc_auc.min - 1) | fabs) < 0.000000000001)) and
+    ((.funding_scheme != "pooled_mixed_rounds") or
+      (.funding_roc_auc.max < 0.75 and .funding_round_roc_auc.max < 0.75 and
+       .funding_batch_roc_auc.max < 0.75)) and
+    ((.funding_scheme != "pooled_per_operator_rounds") or
+      (.funding_round_roc_auc.min > 0.75 and .funding_batch_roc_auc.min > 0.75))) and
+  (.limitation | contains("do not establish transaction-graph anonymity")) and
+  (.limitation | contains("pooled uniform-denomination rounds")) and
+  (.limitation | contains("scheme-aware"))
 ' "${raw_dir}/evaluation/evaluation.json" >/dev/null || die "evaluation evidence contract failed"
 cp "${raw_dir}/evaluation/evaluation.json" "${staging}/metrics.json"
 cp "${raw_dir}/evaluation/evaluation.csv" "${staging}/metrics.csv"

@@ -7,6 +7,11 @@ used to claim the canonical scale gates.
 Status: the canonical `evidence/final` pack and both fresh-clone repetitions passed on
 2026-07-18 from source commit `8cc338e968fb2ff561508ba2ca69d113e20035b9`.
 
+`evidence/funding` is a separate record from one offline `cooker evaluate` run that
+measures funding provenance per payer-assignment scheme. It postdates the `evidence/final`
+pack, whose evaluator artifacts carry the pre-mitigation baseline and no funding-scheme
+column. See [the funding-provenance measurement](funding/README.md).
+
 `evidence/devnet` is a separate, smaller record from one bounded public Solana devnet run.
 It is produced by the opt-in `scripts/devnet-soak.sh` and is never part of the canonical
 pack, because the canonical pack is defined to contain no public-network transaction. The
@@ -76,7 +81,11 @@ The evidence can establish only its named engineering invariants and synthetic e
 metrics. It does not establish anonymity or resemblance to all human Solana activity. In
 particular:
 
-- a common funding graph remains directly observable;
+- a dedicated per-operator funding wallet remains directly observable and is measured at
+  ROC AUC 1.0000 under all three funding attacks; a pooled uniform-denomination scheme that
+  mixes each round's recipients across operators drops the same attacks to chance, but that
+  covers the disbursement side only and leaves pool deposits, pool custody, and cross-pool
+  value or count matching unmeasured, so it does not establish transaction-graph anonymity;
 - evaluator attacks and ownership labels use synthetic known ground truth;
 - reviewed Jupiter state is a 21-account offline snapshot captured from a lazy fork and
   frozen at slot `433717382`;

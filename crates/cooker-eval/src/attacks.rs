@@ -1,6 +1,6 @@
 //! Transparent pairwise linkage attacks over extracted observations.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cooker_core::AgentId;
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,11 @@ pub enum FeatureFamily {
     Synchrony,
     /// Common-funder overlap.
     Funding,
+    /// Common funding-round overlap, which reads the payer and the batching round together.
+    FundingRound,
+    /// Scheme-aware co-funding, which weights a shared payer-and-round batch by how few
+    /// accounts were in it.
+    FundingBatch,
     /// Protocol-route overlap.
     Route,
     /// Mean balance-rank proximity.
@@ -44,6 +49,13 @@ pub struct AttackWeights {
     pub synchrony: f64,
     /// Common-funder weight.
     pub funding: f64,
+    /// Funding-round weight. The fixed composite leaves this at zero so composite results
+    /// stay comparable with the pre-mitigation baseline; the family is always reported on
+    /// its own at full strength.
+    pub funding_round: f64,
+    /// Scheme-aware co-funding weight. Held at zero for the same comparability reason as
+    /// `funding_round`, and reported on its own at full strength.
+    pub funding_batch: f64,
     /// Route weight.
     pub route: f64,
     /// Balance-rank weight.
@@ -59,6 +71,8 @@ impl Default for AttackWeights {
             destination: 0.10,
             synchrony: 0.14,
             funding: 0.14,
+            funding_round: 0.0,
+            funding_batch: 0.0,
             route: 0.08,
             balance_rank: 0.06,
         }
@@ -77,6 +91,8 @@ impl AttackWeights {
             FeatureFamily::Destination => output.destination = 0.0,
             FeatureFamily::Synchrony => output.synchrony = 0.0,
             FeatureFamily::Funding => output.funding = 0.0,
+            FeatureFamily::FundingRound => output.funding_round = 0.0,
+            FeatureFamily::FundingBatch => output.funding_batch = 0.0,
             FeatureFamily::Route => output.route = 0.0,
             FeatureFamily::BalanceRank => output.balance_rank = 0.0,
         }
@@ -92,6 +108,8 @@ impl AttackWeights {
         self.destination = self.destination.max(0.0);
         self.synchrony = self.synchrony.max(0.0);
         self.funding = self.funding.max(0.0);
+        self.funding_round = self.funding_round.max(0.0);
+        self.funding_batch = self.funding_batch.max(0.0);
         self.route = self.route.max(0.0);
         self.balance_rank = self.balance_rank.max(0.0);
         let sum = self.timing
@@ -100,6 +118,8 @@ impl AttackWeights {
             + self.destination
             + self.synchrony
             + self.funding
+            + self.funding_round
+            + self.funding_batch
             + self.route
             + self.balance_rank;
         if sum > 0.0 {
@@ -109,6 +129,8 @@ impl AttackWeights {
             self.destination /= sum;
             self.synchrony /= sum;
             self.funding /= sum;
+            self.funding_round /= sum;
+            self.funding_batch /= sum;
             self.route /= sum;
             self.balance_rank /= sum;
         }
@@ -135,6 +157,10 @@ pub struct PairScore {
     pub synchrony: f64,
     /// Funding-graph attack score in `[0, 1]`.
     pub funding: f64,
+    /// Funding-round attack score in `[0, 1]`.
+    pub funding_round: f64,
+    /// Scheme-aware co-funding attack score in `[0, 1]`.
+    pub funding_batch: f64,
     /// Route attack score in `[0, 1]`.
     pub route: f64,
     /// Balance-rank attack score in `[0, 1]`.
@@ -163,6 +189,12 @@ pub fn score_pairs(features: &FeatureSet, weights: AttackWeights) -> Vec<PairSco
                 features.synchrony_window_seconds,
             );
             let funding = jaccard(&left.funders, &right.funders);
+            let funding_round = jaccard(&left.funding_rounds, &right.funding_rounds);
+            let funding_batch = rarity_weighted_overlap(
+                &left.funding_rounds,
+                &right.funding_rounds,
+                &features.funding_cell_agents,
+            );
             let route = jaccard(&left.routes, &right.routes);
             let balance_rank = balance_rank_score(left.mean_balance_rank, right.mean_balance_rank);
             let composite = timing * weights.timing
@@ -171,6 +203,8 @@ pub fn score_pairs(features: &FeatureSet, weights: AttackWeights) -> Vec<PairSco
                 + destination * weights.destination
                 + synchrony * weights.synchrony
                 + funding * weights.funding
+                + funding_round * weights.funding_round
+                + funding_batch * weights.funding_batch
                 + route * weights.route
                 + balance_rank * weights.balance_rank;
             output.push(PairScore {
@@ -182,6 +216,8 @@ pub fn score_pairs(features: &FeatureSet, weights: AttackWeights) -> Vec<PairSco
                 destination,
                 synchrony,
                 funding,
+                funding_round,
+                funding_batch,
                 route,
                 balance_rank,
                 composite: composite.clamp(0.0, 1.0),
@@ -247,6 +283,39 @@ fn cosine(left: &[f64], right: &[f64]) -> f64 {
     }
 }
 
+/// Score co-funding evidence the way an adversary who knows the pooling scheme would.
+///
+/// Plain overlap treats every shared payer-and-round batch alike. An adversary who knows
+/// that a pool deals accounts into batches gains far more from a batch of two than from a
+/// batch of twenty, because a small batch nearly names its members. Each cell therefore
+/// carries weight `1 / ln(1 + members)`, and the score is the cosine of the two weighted
+/// indicator vectors, which stays in `[0, 1]` and reaches one only for identical cell sets.
+///
+/// The member count is read from the observations themselves, so the attacker needs no
+/// operator labels and no knowledge the chain does not already publish.
+fn rarity_weighted_overlap(
+    left: &BTreeSet<String>,
+    right: &BTreeSet<String>,
+    cell_agents: &BTreeMap<String, usize>,
+) -> f64 {
+    let weight = |cell: &String| {
+        let members = cell_agents.get(cell).copied().unwrap_or(1).max(1);
+        let scale = count_as_f64(members) + 1.0;
+        1.0 / scale.ln().max(f64::MIN_POSITIVE)
+    };
+    let squared_norm = |set: &BTreeSet<String>| set.iter().map(|cell| weight(cell).powi(2)).sum();
+    let left_norm: f64 = squared_norm(left);
+    let right_norm: f64 = squared_norm(right);
+    if left_norm <= 0.0 || right_norm <= 0.0 {
+        return 0.0;
+    }
+    let shared: f64 = left
+        .intersection(right)
+        .map(|cell| weight(cell).powi(2))
+        .sum();
+    (shared / (left_norm * right_norm).sqrt()).clamp(0.0, 1.0)
+}
+
 fn jaccard<T: Ord>(left: &BTreeSet<T>, right: &BTreeSet<T>) -> f64 {
     let union = left.union(right).count();
     if union == 0 {
@@ -310,9 +379,51 @@ mod tests {
             + weights.destination
             + weights.synchrony
             + weights.funding
+            + weights.funding_round
+            + weights.funding_batch
             + weights.route
             + weights.balance_rank;
         assert!((sum - 1.0).abs() < 1e-12);
         assert!(weights.timing > 0.0);
+    }
+
+    fn cells(values: &[&str]) -> BTreeSet<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn rarity_weighting_prefers_small_shared_batches() {
+        let counts = BTreeMap::from([("tiny".to_owned(), 2), ("wide".to_owned(), 200)]);
+        let tiny = rarity_weighted_overlap(
+            &cells(&["tiny", "solo-left"]),
+            &cells(&["tiny", "solo-right"]),
+            &counts,
+        );
+        let wide = rarity_weighted_overlap(
+            &cells(&["wide", "solo-left"]),
+            &cells(&["wide", "solo-right"]),
+            &counts,
+        );
+        assert!(
+            tiny > wide,
+            "a shared two-account batch must outrank a shared two-hundred-account batch: {tiny} vs {wide}"
+        );
+        assert!((0.0..=1.0).contains(&tiny) && (0.0..=1.0).contains(&wide));
+    }
+
+    #[test]
+    fn rarity_weighting_is_bounded_and_symmetric() {
+        let counts = BTreeMap::from([("a".to_owned(), 3), ("b".to_owned(), 9)]);
+        let left = cells(&["a", "b"]);
+        let right = cells(&["a", "b"]);
+        assert!((rarity_weighted_overlap(&left, &right, &counts) - 1.0).abs() < 1e-12);
+        let other = cells(&["b"]);
+        assert!(
+            (rarity_weighted_overlap(&left, &other, &counts)
+                - rarity_weighted_overlap(&other, &left, &counts))
+            .abs()
+                < 1e-12
+        );
+        assert!(rarity_weighted_overlap(&left, &cells(&[]), &counts).abs() < f64::EPSILON);
     }
 }

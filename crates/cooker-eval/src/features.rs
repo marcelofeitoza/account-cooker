@@ -42,6 +42,8 @@ impl FeatureConfig {
 pub struct FeatureSet {
     pub(crate) agents: BTreeMap<AgentId, AgentFeatures>,
     pub(crate) synchrony_window_seconds: i64,
+    /// Number of observed accounts sharing each funding cell, derived from observations only.
+    pub(crate) funding_cell_agents: BTreeMap<String, usize>,
 }
 
 impl FeatureSet {
@@ -74,6 +76,7 @@ pub(crate) struct AgentFeatures {
     pub bigrams: [f64; BIGRAMS],
     pub destinations: BTreeSet<String>,
     pub funders: BTreeSet<String>,
+    pub funding_rounds: BTreeSet<String>,
     pub routes: BTreeSet<String>,
     pub mean_balance_rank: Option<f64>,
 }
@@ -97,9 +100,17 @@ pub fn extract_features(events: &[TraceEvent], config: FeatureConfig) -> Feature
         agents.insert(agent_id, extract_agent(&agent_events, config.amount_bins));
     }
 
+    let mut funding_cell_agents: BTreeMap<String, usize> = BTreeMap::new();
+    for features in agents.values() {
+        for cell in &features.funding_rounds {
+            *funding_cell_agents.entry(cell.clone()).or_insert(0) += 1;
+        }
+    }
+
     FeatureSet {
         agents,
         synchrony_window_seconds: config.synchrony_window_seconds,
+        funding_cell_agents,
     }
 }
 
@@ -129,6 +140,9 @@ fn extract_agent(events: &[&TraceEvent], amount_bins: usize) -> AgentFeatures {
         }
         if let Some(funder) = event.attributes.get("funder") {
             features.funders.insert(funder.clone());
+        }
+        if let Some(round) = event.attributes.get("funding_round") {
+            features.funding_rounds.insert(round.clone());
         }
         if let Some(route) = event.attributes.get("route") {
             features.routes.insert(route.clone());

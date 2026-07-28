@@ -1,0 +1,635 @@
+{
+  "config": {
+    "controllers": 10,
+    "agents_per_controller": 10,
+    "days": 30,
+    "events_per_agent_per_day": 2,
+    "seeds": [
+      11,
+      23,
+      37,
+      51,
+      71
+    ],
+    "threshold": 0.55,
+    "weights": {
+      "timing": 0.18,
+      "amount": 0.15,
+      "sequence": 0.15,
+      "destination": 0.1,
+      "synchrony": 0.14,
+      "funding": 0.14,
+      "funding_round": 0.0,
+      "funding_batch": 0.0,
+      "route": 0.08,
+      "balance_rank": 0.06
+    },
+    "funding_schemes": [
+      "dedicated_per_operator",
+      "pooled_mixed_rounds",
+      "pooled_per_operator_rounds"
+    ],
+    "funding": {
+      "disbursers": 8,
+      "round_hours": 24,
+      "top_ups_per_account": 4,
+      "denomination_lamports": 600000000
+    }
+  },
+  "funding_summary": [
+    {
+      "funding_scheme": "dedicated_per_operator",
+      "planner": "naive_uniform",
+      "funding_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "funding_round_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "funding_batch_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "funding_separation": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "composite_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      }
+    },
+    {
+      "funding_scheme": "dedicated_per_operator",
+      "planner": "independent_weighted",
+      "funding_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "funding_round_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "funding_batch_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "funding_separation": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "composite_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      }
+    },
+    {
+      "funding_scheme": "dedicated_per_operator",
+      "planner": "persona_session",
+      "funding_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "funding_round_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "funding_batch_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "funding_separation": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      },
+      "composite_roc_auc": {
+        "mean": 0.981407901234568,
+        "min": 0.9802548148148148,
+        "max": 0.9820864197530864,
+        "standard_deviation": 0.0007242177769896615,
+        "confidence_95_low": 0.9807730963640618,
+        "confidence_95_high": 0.9820427061050742
+      }
+    },
+    {
+      "funding_scheme": "pooled_mixed_rounds",
+      "planner": "naive_uniform",
+      "funding_roc_auc": {
+        "mean": 0.5054484938271605,
+        "min": 0.4831145679012346,
+        "max": 0.517122962962963,
+        "standard_deviation": 0.013965866951512952,
+        "confidence_95_low": 0.4932068717027866,
+        "confidence_95_high": 0.5176901159515344
+      },
+      "funding_round_roc_auc": {
+        "mean": 0.4976747160493827,
+        "min": 0.49084864197530864,
+        "max": 0.5141498765432099,
+        "standard_deviation": 0.009659861910622574,
+        "confidence_95_low": 0.48920747375830076,
+        "confidence_95_high": 0.5061419583404646
+      },
+      "funding_batch_roc_auc": {
+        "mean": 0.497975901234568,
+        "min": 0.49150172839506173,
+        "max": 0.5141822222222222,
+        "standard_deviation": 0.00941893399930586,
+        "confidence_95_low": 0.4897198415689395,
+        "confidence_95_high": 0.5062319609001965
+      },
+      "funding_separation": {
+        "mean": 0.0028010582010541073,
+        "min": -0.01255873015873421,
+        "max": 0.013680423280418352,
+        "standard_deviation": 0.010365649739472283,
+        "confidence_95_low": -0.006284834398723791,
+        "confidence_95_high": 0.011886950800832007
+      },
+      "composite_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      }
+    },
+    {
+      "funding_scheme": "pooled_mixed_rounds",
+      "planner": "independent_weighted",
+      "funding_roc_auc": {
+        "mean": 0.5054484938271605,
+        "min": 0.4831145679012346,
+        "max": 0.517122962962963,
+        "standard_deviation": 0.013965866951512952,
+        "confidence_95_low": 0.4932068717027866,
+        "confidence_95_high": 0.5176901159515344
+      },
+      "funding_round_roc_auc": {
+        "mean": 0.4976747160493827,
+        "min": 0.49084864197530864,
+        "max": 0.5141498765432099,
+        "standard_deviation": 0.009659861910622574,
+        "confidence_95_low": 0.48920747375830076,
+        "confidence_95_high": 0.5061419583404646
+      },
+      "funding_batch_roc_auc": {
+        "mean": 0.497975901234568,
+        "min": 0.49150172839506173,
+        "max": 0.5141822222222222,
+        "standard_deviation": 0.00941893399930586,
+        "confidence_95_low": 0.4897198415689395,
+        "confidence_95_high": 0.5062319609001965
+      },
+      "funding_separation": {
+        "mean": 0.0028010582010541073,
+        "min": -0.01255873015873421,
+        "max": 0.013680423280418352,
+        "standard_deviation": 0.010365649739472283,
+        "confidence_95_low": -0.006284834398723791,
+        "confidence_95_high": 0.011886950800832007
+      },
+      "composite_roc_auc": {
+        "mean": 0.7110709135802469,
+        "min": 0.7036098765432098,
+        "max": 0.7193249382716049,
+        "standard_deviation": 0.005925049488685956,
+        "confidence_95_low": 0.70587737871696,
+        "confidence_95_high": 0.7162644484435338
+      }
+    },
+    {
+      "funding_scheme": "pooled_mixed_rounds",
+      "planner": "persona_session",
+      "funding_roc_auc": {
+        "mean": 0.5054484938271605,
+        "min": 0.4831145679012346,
+        "max": 0.517122962962963,
+        "standard_deviation": 0.013965866951512952,
+        "confidence_95_low": 0.4932068717027866,
+        "confidence_95_high": 0.5176901159515344
+      },
+      "funding_round_roc_auc": {
+        "mean": 0.4976747160493827,
+        "min": 0.49084864197530864,
+        "max": 0.5141498765432099,
+        "standard_deviation": 0.009659861910622574,
+        "confidence_95_low": 0.48920747375830076,
+        "confidence_95_high": 0.5061419583404646
+      },
+      "funding_batch_roc_auc": {
+        "mean": 0.497975901234568,
+        "min": 0.49150172839506173,
+        "max": 0.5141822222222222,
+        "standard_deviation": 0.00941893399930586,
+        "confidence_95_low": 0.4897198415689395,
+        "confidence_95_high": 0.5062319609001965
+      },
+      "funding_separation": {
+        "mean": 0.0028010582010541073,
+        "min": -0.01255873015873421,
+        "max": 0.013680423280418352,
+        "standard_deviation": 0.010365649739472283,
+        "confidence_95_low": -0.006284834398723791,
+        "confidence_95_high": 0.011886950800832007
+      },
+      "composite_roc_auc": {
+        "mean": 0.675083061728395,
+        "min": 0.6531204938271605,
+        "max": 0.6849288888888889,
+        "standard_deviation": 0.013005061354652918,
+        "confidence_95_low": 0.6636836228420958,
+        "confidence_95_high": 0.6864825006146943
+      }
+    },
+    {
+      "funding_scheme": "pooled_per_operator_rounds",
+      "planner": "naive_uniform",
+      "funding_roc_auc": {
+        "mean": 0.7202799506172839,
+        "min": 0.699939012345679,
+        "max": 0.7439701234567901,
+        "standard_deviation": 0.0180069841345605,
+        "confidence_95_low": 0.704496133104186,
+        "confidence_95_high": 0.7360637681303818
+      },
+      "funding_round_roc_auc": {
+        "mean": 0.948707111111111,
+        "min": 0.923538024691358,
+        "max": 0.965593086419753,
+        "standard_deviation": 0.019271616454627577,
+        "confidence_95_low": 0.9318147944950015,
+        "confidence_95_high": 0.9655994277272204
+      },
+      "funding_batch_roc_auc": {
+        "mean": 0.9473775802469134,
+        "min": 0.928834074074074,
+        "max": 0.9592081481481481,
+        "standard_deviation": 0.011655146786760873,
+        "confidence_95_low": 0.9371613936497627,
+        "confidence_95_high": 0.9575937668440642
+      },
+      "funding_separation": {
+        "mean": 0.1606565079365028,
+        "min": 0.15110476190475713,
+        "max": 0.1775539682539634,
+        "standard_deviation": 0.010995883987049206,
+        "confidence_95_low": 0.15101819066194735,
+        "confidence_95_high": 0.17029482521105824
+      },
+      "composite_roc_auc": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "standard_deviation": 0.0,
+        "confidence_95_low": 1.0,
+        "confidence_95_high": 1.0
+      }
+    },
+    {
+      "funding_scheme": "pooled_per_operator_rounds",
+      "planner": "independent_weighted",
+      "funding_roc_auc": {
+        "mean": 0.7202799506172839,
+        "min": 0.699939012345679,
+        "max": 0.7439701234567901,
+        "standard_deviation": 0.0180069841345605,
+        "confidence_95_low": 0.704496133104186,
+        "confidence_95_high": 0.7360637681303818
+      },
+      "funding_round_roc_auc": {
+        "mean": 0.948707111111111,
+        "min": 0.923538024691358,
+        "max": 0.965593086419753,
+        "standard_deviation": 0.019271616454627577,
+        "confidence_95_low": 0.9318147944950015,
+        "confidence_95_high": 0.9655994277272204
+      },
+      "funding_batch_roc_auc": {
+        "mean": 0.9473775802469134,
+        "min": 0.928834074074074,
+        "max": 0.9592081481481481,
+        "standard_deviation": 0.011655146786760873,
+        "confidence_95_low": 0.9371613936497627,
+        "confidence_95_high": 0.9575937668440642
+      },
+      "funding_separation": {
+        "mean": 0.1606565079365028,
+        "min": 0.15110476190475713,
+        "max": 0.1775539682539634,
+        "standard_deviation": 0.010995883987049206,
+        "confidence_95_low": 0.15101819066194735,
+        "confidence_95_high": 0.17029482521105824
+      },
+      "composite_roc_auc": {
+        "mean": 0.8378472098765432,
+        "min": 0.8265224691358025,
+        "max": 0.8569906172839507,
+        "standard_deviation": 0.015271304729127043,
+        "confidence_95_low": 0.8244613210886018,
+        "confidence_95_high": 0.8512330986644845
+      }
+    },
+    {
+      "funding_scheme": "pooled_per_operator_rounds",
+      "planner": "persona_session",
+      "funding_roc_auc": {
+        "mean": 0.7202799506172839,
+        "min": 0.699939012345679,
+        "max": 0.7439701234567901,
+        "standard_deviation": 0.0180069841345605,
+        "confidence_95_low": 0.704496133104186,
+        "confidence_95_high": 0.7360637681303818
+      },
+      "funding_round_roc_auc": {
+        "mean": 0.948707111111111,
+        "min": 0.923538024691358,
+        "max": 0.965593086419753,
+        "standard_deviation": 0.019271616454627577,
+        "confidence_95_low": 0.9318147944950015,
+        "confidence_95_high": 0.9655994277272204
+      },
+      "funding_batch_roc_auc": {
+        "mean": 0.9473775802469134,
+        "min": 0.928834074074074,
+        "max": 0.9592081481481481,
+        "standard_deviation": 0.011655146786760873,
+        "confidence_95_low": 0.9371613936497627,
+        "confidence_95_high": 0.9575937668440642
+      },
+      "funding_separation": {
+        "mean": 0.1606565079365028,
+        "min": 0.15110476190475713,
+        "max": 0.1775539682539634,
+        "standard_deviation": 0.010995883987049206,
+        "confidence_95_low": 0.15101819066194735,
+        "confidence_95_high": 0.17029482521105824
+      },
+      "composite_roc_auc": {
+        "mean": 0.7937722469135802,
+        "min": 0.7770103703703704,
+        "max": 0.8056128395061728,
+        "standard_deviation": 0.011547693945987758,
+        "confidence_95_low": 0.7836502468841163,
+        "confidence_95_high": 0.803894246943044
+      }
+    }
+  ],
+  "funding_schedule": [
+    {
+      "funding_scheme": "dedicated_per_operator",
+      "seed": 11,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 10,
+        "rounds": 30,
+        "mean_batch_recipients": 2.0833333333333335,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 1.0
+      }
+    },
+    {
+      "funding_scheme": "dedicated_per_operator",
+      "seed": 23,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 10,
+        "rounds": 30,
+        "mean_batch_recipients": 2.0618556701030926,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 1.0
+      }
+    },
+    {
+      "funding_scheme": "dedicated_per_operator",
+      "seed": 37,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 10,
+        "rounds": 30,
+        "mean_batch_recipients": 1.9900497512437811,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 1.0
+      }
+    },
+    {
+      "funding_scheme": "dedicated_per_operator",
+      "seed": 51,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 10,
+        "rounds": 30,
+        "mean_batch_recipients": 2.0408163265306123,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 1.0
+      }
+    },
+    {
+      "funding_scheme": "dedicated_per_operator",
+      "seed": 71,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 10,
+        "rounds": 30,
+        "mean_batch_recipients": 1.9607843137254901,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 1.0
+      }
+    },
+    {
+      "funding_scheme": "pooled_mixed_rounds",
+      "seed": 11,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 1.7167381974248928,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.39
+      }
+    },
+    {
+      "funding_scheme": "pooled_mixed_rounds",
+      "seed": 23,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 1.7167381974248928,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.34
+      }
+    },
+    {
+      "funding_scheme": "pooled_mixed_rounds",
+      "seed": 37,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 1.7467248908296944,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.29
+      }
+    },
+    {
+      "funding_scheme": "pooled_mixed_rounds",
+      "seed": 51,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 1.7316017316017316,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.37
+      }
+    },
+    {
+      "funding_scheme": "pooled_mixed_rounds",
+      "seed": 71,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 1.7699115044247788,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.36
+      }
+    },
+    {
+      "funding_scheme": "pooled_per_operator_rounds",
+      "seed": 11,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 2.8368794326241136,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.35
+      }
+    },
+    {
+      "funding_scheme": "pooled_per_operator_rounds",
+      "seed": 23,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 2.985074626865672,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.25
+      }
+    },
+    {
+      "funding_scheme": "pooled_per_operator_rounds",
+      "seed": 37,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 2.898550724637681,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.28
+      }
+    },
+    {
+      "funding_scheme": "pooled_per_operator_rounds",
+      "seed": 51,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 2.898550724637681,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.42
+      }
+    },
+    {
+      "funding_scheme": "pooled_per_operator_rounds",
+      "seed": 71,
+      "funding": {
+        "denomination_lamports": 600000000,
+        "transfers": 400,
+        "funders": 8,
+        "rounds": 30,
+        "mean_batch_recipients": 2.7777777777777777,
+        "min_batch_recipients": 1,
+        "mean_observed_funders": 3.24
+      }
+    }
+  ],
+  "limitation": "Funding provenance is measured per scheme, not assumed. The dedicated-funder scheme stays perfectly linkable under all three funding attacks, including the scheme-aware one that weights small shared batches, and pooled uniform-denomination rounds close only the disbursement-adjacency channel this evaluator observes. Deposits into the pool, custody of the pool, the fleet-level fact that every account appears in the first round, and value or count matching across the pool boundary are unmeasured here, so lower linkage scores still do not establish transaction-graph anonymity."
+}

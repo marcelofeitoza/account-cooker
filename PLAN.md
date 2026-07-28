@@ -113,7 +113,10 @@ These are possible follow-on projects, not completion gates and not implied capa
 - Mainnet execution of any kind.
 - Unattended or continuous devnet bot operation. The one devnet run is a bounded,
   hand-started measurement, not a deployed workload.
-- Hiding or laundering a common funding source.
+- Hiding or laundering a common funding source. The evaluator measures what different
+  payer-assignment schemes do to the funding attack, and `cooker-core::funding` builds
+  those schedules, but no pooling is wired into the runtime `cooker fund` path and no
+  custodial or on-chain mixing service is implemented.
 - A ZK pool, mixer, relay, or external privacy-protocol integration.
 - Cross-host consensus or a distributed database.
 - DAO voting, airdrop farming, referral farming, NFT manipulation, or wash volume.
@@ -348,6 +351,8 @@ the Surfnet are the authoritative chain-facing test corpus.
 ### Declared attacker features
 
 - common funding ancestor and funding depth;
+- shared payer and batching round read together;
+- scheme-aware co-funding weighted by how few accounts shared a batch;
 - common fee payer or signer reuse;
 - amount uniqueness, roundness, and relative balance fraction;
 - inter-arrival time, active hours, periodicity, and burst structure;

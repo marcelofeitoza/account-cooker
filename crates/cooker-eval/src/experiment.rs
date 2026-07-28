@@ -3,14 +3,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Duration, TimeZone, Utc};
-use cooker_core::{ActionId, ActionKind, AgentId, RunId, TraceEvent, TraceOutcome};
+use cooker_core::{
+    ActionId, ActionKind, AgentId, FundingPlan, FundingScheme, OperatorAccount,
+    PooledFundingConfig, RunId, TraceEvent, TraceOutcome,
+};
 use rand::{Rng, SeedableRng, seq::SliceRandom};
 use rand_chacha::ChaCha12Rng;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    AttackWeights, EvaluationMetrics, FeatureConfig, FeatureFamily, GroundTruth,
+    AttackWeights, EvaluationMetrics, FeatureConfig, FeatureFamily, FeatureSet, GroundTruth,
     ObservationDataset, PairScore, evaluate_scores, extract_features, score_pairs,
 };
 
@@ -36,6 +39,58 @@ pub enum Ablation {
     Without(FeatureFamily),
 }
 
+/// Funding-provenance settings shared by every measured funding scheme.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FundingModel {
+    /// Shared disbursing wallets available to pooled schemes.
+    pub disbursers: usize,
+    /// Hours covered by one batching round.
+    pub round_hours: u32,
+    /// Top-ups every account receives across the horizon, including provisioning.
+    pub top_ups_per_account: usize,
+    /// Fixed lamport denomination of every top-up.
+    pub denomination_lamports: u64,
+}
+
+impl Default for FundingModel {
+    fn default() -> Self {
+        Self {
+            disbursers: 8,
+            round_hours: 24,
+            top_ups_per_account: 4,
+            denomination_lamports: 600_000_000,
+        }
+    }
+}
+
+impl FundingModel {
+    /// Resolve the schedule parameters for a horizon.
+    ///
+    /// Requested top-ups are clamped to the number of available rounds so that short
+    /// horizons stay schedulable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the horizon does not fit the schedule counters.
+    pub fn schedule(&self, days: u32) -> Result<PooledFundingConfig, String> {
+        let round_hours = u64::from(self.round_hours.max(1));
+        let rounds = u64::from(days)
+            .saturating_mul(24)
+            .div_ceil(round_hours)
+            .max(1);
+        let rounds =
+            u32::try_from(rounds).map_err(|_| "funding rounds do not fit u32".to_owned())?;
+        let horizon =
+            usize::try_from(rounds).map_err(|_| "funding rounds do not fit usize".to_owned())?;
+        Ok(PooledFundingConfig {
+            disbursers: self.disbursers,
+            rounds,
+            top_ups_per_account: self.top_ups_per_account.clamp(1, horizon),
+            denomination_lamports: self.denomination_lamports,
+        })
+    }
+}
+
 /// Equal-budget comparative experiment settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExperimentConfig {
@@ -57,6 +112,10 @@ pub struct ExperimentConfig {
     pub weights: AttackWeights,
     /// Requested composite ablations.
     pub ablations: Vec<Ablation>,
+    /// Funding schemes compared under identical behavior, budgets, and attacker settings.
+    pub funding_schemes: Vec<FundingScheme>,
+    /// Funding-provenance settings shared by every scheme.
+    pub funding: FundingModel,
 }
 
 impl Default for ExperimentConfig {
@@ -78,6 +137,12 @@ impl Default for ExperimentConfig {
                 Ablation::Without(FeatureFamily::Synchrony),
                 Ablation::Without(FeatureFamily::Funding),
             ],
+            funding_schemes: vec![
+                FundingScheme::DedicatedPerOperator,
+                FundingScheme::PooledMixedRounds,
+                FundingScheme::PooledPerOperatorRounds,
+            ],
+            funding: FundingModel::default(),
         }
     }
 }
@@ -113,13 +178,54 @@ impl ExperimentConfig {
         if !self.ablations.contains(&Ablation::None) {
             return Err("ablations must include the full attacker".to_owned());
         }
+        if self
+            .funding_schemes
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .len()
+            != self.funding_schemes.len()
+        {
+            return Err("funding schemes must be unique".to_owned());
+        }
+        if !self
+            .funding_schemes
+            .contains(&FundingScheme::DedicatedPerOperator)
+        {
+            return Err("funding schemes must include the dedicated-funder baseline".to_owned());
+        }
+        self.funding
+            .schedule(self.days)?
+            .validate()
+            .map_err(|error| error.to_string())?;
         Ok(())
     }
 }
 
-/// One seed, planner, and ablation result.
+/// Cost and structure of the funding schedule behind one measured arm.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FundingObservation {
+    /// Uniform lamport denomination of every top-up.
+    pub denomination_lamports: u64,
+    /// Scheduled funding transfers across the fleet.
+    pub transfers: usize,
+    /// Distinct paying wallets in the schedule.
+    pub funders: usize,
+    /// Batching rounds in the horizon.
+    pub rounds: u32,
+    /// Mean recipients per round and payer batch.
+    pub mean_batch_recipients: f64,
+    /// Smallest recipient count of any round and payer batch.
+    pub min_batch_recipients: usize,
+    /// Mean distinct payers an observer can read from one account's history.
+    pub mean_observed_funders: f64,
+}
+
+/// One seed, planner, funding scheme, and ablation result.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SeedResult {
+    /// Funding scheme used to provision the fleet.
+    pub funding_scheme: FundingScheme,
     /// Planner family.
     pub planner: PlannerVariant,
     /// Held-out seed.
@@ -142,6 +248,8 @@ pub struct SeedResult {
     pub per_feature: BTreeMap<FeatureFamily, EvaluationMetrics>,
     /// Within-controller and between-controller score distance for every feature.
     pub feature_separation: BTreeMap<FeatureFamily, FeatureSeparation>,
+    /// Structure and cost of the funding schedule that produced the observations.
+    pub funding: FundingObservation,
 }
 
 /// Label-stage distance between controlled and unrelated wallet pairs.
@@ -172,9 +280,11 @@ pub struct MetricRange {
     pub confidence_95_high: f64,
 }
 
-/// Aggregated composite metrics for one planner and ablation.
+/// Aggregated composite metrics for one funding scheme, planner, and ablation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AggregateResult {
+    /// Funding scheme used to provision the fleet.
+    pub funding_scheme: FundingScheme,
     /// Planner family.
     pub planner: PlannerVariant,
     /// Composite ablation.
@@ -191,6 +301,25 @@ pub struct AggregateResult {
     pub normalized_mutual_information: MetricRange,
 }
 
+/// Funding-provenance summary for one scheme and planner across held-out seeds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FundingSummary {
+    /// Funding scheme used to provision the fleet.
+    pub funding_scheme: FundingScheme,
+    /// Planner family.
+    pub planner: PlannerVariant,
+    /// Common-funder attack summary.
+    pub funding_roc_auc: MetricRange,
+    /// Funding-round attack summary.
+    pub funding_round_roc_auc: MetricRange,
+    /// Scheme-aware co-funding attack summary.
+    pub funding_batch_roc_auc: MetricRange,
+    /// Common-funder within-minus-between separation summary.
+    pub funding_separation: MetricRange,
+    /// Full composite attacker summary for the same arm.
+    pub composite_roc_auc: MetricRange,
+}
+
 /// Complete reproducible comparative result.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExperimentResult {
@@ -200,6 +329,8 @@ pub struct ExperimentResult {
     pub seeds: Vec<SeedResult>,
     /// Mean, minimum, and maximum summaries.
     pub aggregates: Vec<AggregateResult>,
+    /// Funding-provenance comparison across the measured schemes.
+    pub funding_summary: Vec<FundingSummary>,
     /// Explicit interpretation bound that accompanies every report.
     pub limitation: String,
 }
@@ -218,60 +349,80 @@ pub fn run_experiment(config: ExperimentConfig) -> Result<ExperimentResult, Stri
     ];
     let mut seed_results = Vec::new();
 
-    for variant in variants {
-        for &seed in &config.seeds {
-            let (mut observations, truth) = generate_dataset(&config, variant, seed)?;
-            observations.normalize();
-            let trace_bytes = serde_json::to_vec(&observations)
-                .map_err(|error| format!("failed to serialize trace: {error}"))?;
-            let trace_hash = blake3::hash(&trace_bytes).to_hex().to_string();
-            let features = extract_features(&observations.events, config.features);
-            let full_pairs = score_pairs(&features, config.weights);
-            let per_feature = per_feature_metrics(&full_pairs, &truth, config.threshold)?;
-            let feature_separation = feature_separations(&full_pairs, &truth)?;
-            let mut action_counts = BTreeMap::new();
-            for event in &observations.events {
-                *action_counts.entry(event.action_kind).or_insert(0) += 1;
-            }
+    for &scheme in &config.funding_schemes {
+        for variant in variants {
+            for &seed in &config.seeds {
+                let (mut observations, truth, plan) =
+                    generate_dataset(&config, variant, scheme, seed)?;
+                observations.normalize();
+                let trace_bytes = serde_json::to_vec(&observations)
+                    .map_err(|error| format!("failed to serialize trace: {error}"))?;
+                let trace_hash = blake3::hash(&trace_bytes).to_hex().to_string();
+                let features = extract_features(&observations.events, config.features);
+                let funding = funding_observation(&plan, &features);
+                let full_pairs = score_pairs(&features, config.weights);
+                let per_feature = per_feature_metrics(&full_pairs, &truth, config.threshold)?;
+                let feature_separation = feature_separations(&full_pairs, &truth)?;
+                let mut action_counts = BTreeMap::new();
+                for event in &observations.events {
+                    *action_counts.entry(event.action_kind).or_insert(0) += 1;
+                }
 
-            for &ablation in &config.ablations {
-                let weights = match ablation {
-                    Ablation::None => config.weights,
-                    Ablation::Without(family) => config.weights.without(family),
-                };
-                let pairs = score_pairs(&features, weights);
-                let composite = evaluate_scores(&pairs, &truth, config.threshold)?;
-                seed_results.push(SeedResult {
-                    planner: variant,
-                    seed,
-                    ablation,
-                    trace_hash: trace_hash.clone(),
-                    events: observations.events.len(),
-                    pairs: pairs.len(),
-                    action_counts: action_counts.clone(),
-                    rejected_actions: 0,
-                    composite,
-                    per_feature: per_feature.clone(),
-                    feature_separation: feature_separation.clone(),
-                });
+                for &ablation in &config.ablations {
+                    let weights = match ablation {
+                        Ablation::None => config.weights,
+                        Ablation::Without(family) => config.weights.without(family),
+                    };
+                    let pairs = score_pairs(&features, weights);
+                    let composite = evaluate_scores(&pairs, &truth, config.threshold)?;
+                    seed_results.push(SeedResult {
+                        funding_scheme: scheme,
+                        planner: variant,
+                        seed,
+                        ablation,
+                        trace_hash: trace_hash.clone(),
+                        events: observations.events.len(),
+                        pairs: pairs.len(),
+                        action_counts: action_counts.clone(),
+                        rejected_actions: 0,
+                        composite,
+                        per_feature: per_feature.clone(),
+                        feature_separation: feature_separation.clone(),
+                        funding,
+                    });
+                }
             }
         }
     }
 
     let aggregates = aggregate(&seed_results);
+    let funding_summary = funding_summary(&seed_results);
     Ok(ExperimentResult {
         config,
         seeds: seed_results,
         aggregates,
-        limitation: "The common-funder graph remains directly observable; lower behavioral linkage scores do not establish transaction-graph anonymity.".to_owned(),
+        funding_summary,
+        limitation: LIMITATION.to_owned(),
     })
+}
+
+/// Interpretation bound reported with every experiment.
+const LIMITATION: &str = "Funding provenance is measured per scheme, not assumed. The dedicated-funder scheme stays perfectly linkable under all three funding attacks, including the scheme-aware one that weights small shared batches, and pooled uniform-denomination rounds close only the disbursement-adjacency channel this evaluator observes. Deposits into the pool, custody of the pool, the fleet-level fact that every account appears in the first round, and value or count matching across the pool boundary are unmeasured here, so lower linkage scores still do not establish transaction-graph anonymity.";
+
+#[derive(Clone, Debug)]
+struct RosterEntry {
+    controller_index: usize,
+    agent_index: usize,
+    agent_id: AgentId,
+    controller: String,
 }
 
 fn generate_dataset(
     config: &ExperimentConfig,
     variant: PlannerVariant,
+    scheme: FundingScheme,
     seed: u64,
-) -> Result<(ObservationDataset, GroundTruth), String> {
+) -> Result<(ObservationDataset, GroundTruth, FundingPlan), String> {
     let start = Utc
         .with_ymd_and_hms(2026, 1, 1, 0, 0, 0)
         .single()
@@ -287,72 +438,204 @@ fn generate_dataset(
             .saturating_mul(config.days as usize)
             .saturating_mul(config.events_per_agent_per_day as usize),
     );
+    let roster = roster(config);
+    let schedule = config.funding.schedule(config.days)?;
+    let plan = funding_plan(scheme, &roster, schedule, seed)?;
     let mut controllers = BTreeMap::new();
 
-    for controller_index in 0..config.controllers {
-        let controller = format!("controller-{controller_index:03}");
-        for agent_index in 0..config.agents_per_controller {
-            let agent_id = AgentId(Uuid::new_v5(
-                &Uuid::NAMESPACE_OID,
-                format!("noise-agent-{controller_index}-{agent_index}").as_bytes(),
-            ));
-            controllers.insert(agent_id, controller.clone());
-            let decision_seed = decision_seed(seed, agent_id, variant);
-            let mut rng = ChaCha12Rng::from_seed(decision_seed);
-            let timezone_offset = rng.gen_range(-10_i64..=10) * 3_600;
-            let session_hour = rng.gen_range(7_i64..=21);
-            let mut previous_kind = ActionKind::NativeTransfer;
-            let mut sequence = 0_u64;
+    for entry in &roster {
+        controllers.insert(entry.agent_id, entry.controller.clone());
+        let decision_seed = decision_seed(seed, entry.agent_id, variant);
+        let mut rng = ChaCha12Rng::from_seed(decision_seed);
+        let timezone_offset = rng.gen_range(-10_i64..=10) * 3_600;
+        let session_hour = rng.gen_range(7_i64..=21);
+        let mut previous_kind = ActionKind::NativeTransfer;
+        let mut sequence = 0_u64;
 
-            for day in 0..config.days {
-                for event_index in 0..config.events_per_agent_per_day {
-                    let (seconds, kind, amount, destination, route) = generate_observation(
-                        variant,
-                        controller_index,
-                        agent_index,
-                        event_index,
-                        timezone_offset,
-                        session_hour,
-                        previous_kind,
-                        &mut rng,
-                    );
-                    previous_kind = kind;
-                    let timestamp = start
-                        + Duration::days(i64::from(day))
-                        + Duration::seconds(seconds.clamp(0, 86_399));
-                    let action_id = ActionId::derive(run_id, agent_id, sequence, "eval-v1");
-                    let mut attributes = BTreeMap::new();
-                    attributes.insert("funder".to_owned(), format!("funder-{controller_index:03}"));
-                    attributes.insert("route".to_owned(), route);
-                    attributes.insert(
-                        "balance_rank".to_owned(),
-                        format!(
-                            "{}",
-                            controller_index * config.agents_per_controller + agent_index
-                        ),
-                    );
-                    events.push(TraceEvent {
-                        schema_version: TraceEvent::SCHEMA_VERSION,
-                        run_id,
-                        agent_id,
-                        action_id,
-                        sequence,
-                        action_kind: kind,
-                        scheduled_at: timestamp,
-                        observed_at: Some(timestamp),
-                        amount,
-                        destination: Some(destination),
-                        signature: None,
-                        outcome: TraceOutcome::Confirmed,
-                        attributes,
-                    });
-                    sequence = sequence.saturating_add(1);
+        for day in 0..config.days {
+            for event_index in 0..config.events_per_agent_per_day {
+                let (seconds, kind, amount, destination, route) = generate_observation(
+                    variant,
+                    entry.controller_index,
+                    entry.agent_index,
+                    event_index,
+                    timezone_offset,
+                    session_hour,
+                    previous_kind,
+                    &mut rng,
+                );
+                previous_kind = kind;
+                let seconds = seconds.clamp(0, 86_399);
+                let timestamp = start + Duration::days(i64::from(day)) + Duration::seconds(seconds);
+                let action_id = ActionId::derive(run_id, entry.agent_id, sequence, "eval-v1");
+                let round =
+                    funding_round(day, seconds, config.funding.round_hours, schedule.rounds);
+                let mut attributes = BTreeMap::new();
+                if let Some((funder, cell)) = provenance(&plan, scheme, entry.agent_id, round) {
+                    attributes.insert("funder".to_owned(), funder);
+                    attributes.insert("funding_round".to_owned(), cell);
                 }
+                attributes.insert("route".to_owned(), route);
+                attributes.insert(
+                    "balance_rank".to_owned(),
+                    format!(
+                        "{}",
+                        entry.controller_index * config.agents_per_controller + entry.agent_index
+                    ),
+                );
+                events.push(TraceEvent {
+                    schema_version: TraceEvent::SCHEMA_VERSION,
+                    run_id,
+                    agent_id: entry.agent_id,
+                    action_id,
+                    sequence,
+                    action_kind: kind,
+                    scheduled_at: timestamp,
+                    observed_at: Some(timestamp),
+                    amount,
+                    destination: Some(destination),
+                    signature: None,
+                    outcome: TraceOutcome::Confirmed,
+                    attributes,
+                });
+                sequence = sequence.saturating_add(1);
             }
         }
     }
 
-    Ok((ObservationDataset { events }, GroundTruth { controllers }))
+    Ok((
+        ObservationDataset { events },
+        GroundTruth { controllers },
+        plan,
+    ))
+}
+
+fn roster(config: &ExperimentConfig) -> Vec<RosterEntry> {
+    let mut output = Vec::with_capacity(
+        config
+            .controllers
+            .saturating_mul(config.agents_per_controller),
+    );
+    for controller_index in 0..config.controllers {
+        let controller = format!("controller-{controller_index:03}");
+        for agent_index in 0..config.agents_per_controller {
+            output.push(RosterEntry {
+                controller_index,
+                agent_index,
+                agent_id: AgentId(Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("noise-agent-{controller_index}-{agent_index}").as_bytes(),
+                )),
+                controller: controller.clone(),
+            });
+        }
+    }
+    output
+}
+
+fn funding_plan(
+    scheme: FundingScheme,
+    roster: &[RosterEntry],
+    schedule: PooledFundingConfig,
+    seed: u64,
+) -> Result<FundingPlan, String> {
+    let funding_seed = funding_seed(seed);
+    let accounts: Vec<OperatorAccount> = roster
+        .iter()
+        .map(|entry| OperatorAccount {
+            account: entry.agent_id,
+            operator: entry.controller.clone(),
+        })
+        .collect();
+    let plan = match scheme {
+        FundingScheme::DedicatedPerOperator => {
+            FundingPlan::dedicated_per_operator(&accounts, schedule, &funding_seed)
+        }
+        FundingScheme::PooledMixedRounds => {
+            let identifiers: Vec<AgentId> = accounts.iter().map(|entry| entry.account).collect();
+            FundingPlan::pooled_mixed_rounds(&identifiers, schedule, &funding_seed)
+        }
+        FundingScheme::PooledPerOperatorRounds => {
+            FundingPlan::pooled_per_operator_rounds(&accounts, schedule, &funding_seed)
+        }
+    };
+    plan.map_err(|error| format!("funding schedule failed: {error}"))
+}
+
+/// Derive the funding seed from the master seed only.
+///
+/// The planner variant and the funding scheme are excluded so every arm shares one
+/// participation schedule and only the payer assignment differs.
+fn funding_seed(seed: u64) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&seed.to_le_bytes());
+    hasher.update(b"noise-eval-funding-v1");
+    *hasher.finalize().as_bytes()
+}
+
+fn funding_round(day: u32, seconds: i64, round_hours: u32, rounds: u32) -> u32 {
+    let elapsed = i64::from(day)
+        .saturating_mul(86_400)
+        .saturating_add(seconds.max(0));
+    let window = i64::from(round_hours.max(1)).saturating_mul(3_600);
+    let index = elapsed / window.max(1);
+    u32::try_from(index)
+        .unwrap_or(u32::MAX)
+        .min(rounds.saturating_sub(1))
+}
+
+fn provenance(
+    plan: &FundingPlan,
+    scheme: FundingScheme,
+    account: AgentId,
+    round: u32,
+) -> Option<(String, String)> {
+    let top_up = plan.latest_top_up(account, round)?;
+    let funder = funder_name(scheme, top_up.funder);
+    let cell = format!("{funder}@round-{:04}", top_up.round);
+    Some((funder, cell))
+}
+
+fn funder_name(scheme: FundingScheme, funder: usize) -> String {
+    match scheme {
+        FundingScheme::DedicatedPerOperator => format!("funder-{funder:03}"),
+        FundingScheme::PooledMixedRounds | FundingScheme::PooledPerOperatorRounds => {
+            format!("pool-disburser-{funder:03}")
+        }
+    }
+}
+
+fn funding_observation(plan: &FundingPlan, features: &FeatureSet) -> FundingObservation {
+    let batches = plan.batch_recipients();
+    let batch_total: usize = batches.values().sum();
+    let mean_batch_recipients = if batches.is_empty() {
+        0.0
+    } else {
+        count_as_f64(batch_total) / count_as_f64(batches.len())
+    };
+    let funders: BTreeSet<usize> = plan
+        .ordered_top_ups()
+        .iter()
+        .map(|top_up| top_up.funder)
+        .collect();
+    let observed: Vec<f64> = features
+        .agents
+        .values()
+        .map(|agent| count_as_f64(agent.funders.len()))
+        .collect();
+    FundingObservation {
+        denomination_lamports: plan.config().denomination_lamports,
+        transfers: plan.transfers(),
+        funders: funders.len(),
+        rounds: plan.config().rounds,
+        mean_batch_recipients,
+        min_batch_recipients: batches.values().copied().min().unwrap_or(0),
+        mean_observed_funders: mean(&observed),
+    }
+}
+
+fn count_as_f64(value: usize) -> f64 {
+    u32::try_from(value).map_or(f64::from(u32::MAX), f64::from)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -476,6 +759,8 @@ fn per_feature_metrics(
         FeatureFamily::Destination,
         FeatureFamily::Synchrony,
         FeatureFamily::Funding,
+        FeatureFamily::FundingRound,
+        FeatureFamily::FundingBatch,
         FeatureFamily::Route,
         FeatureFamily::BalanceRank,
     ] {
@@ -490,6 +775,8 @@ fn per_feature_metrics(
                     FeatureFamily::Destination => pair.destination,
                     FeatureFamily::Synchrony => pair.synchrony,
                     FeatureFamily::Funding => pair.funding,
+                    FeatureFamily::FundingRound => pair.funding_round,
+                    FeatureFamily::FundingBatch => pair.funding_batch,
                     FeatureFamily::Route => pair.route,
                     FeatureFamily::BalanceRank => pair.balance_rank,
                 };
@@ -513,6 +800,8 @@ fn feature_separations(
         FeatureFamily::Destination,
         FeatureFamily::Synchrony,
         FeatureFamily::Funding,
+        FeatureFamily::FundingRound,
+        FeatureFamily::FundingBatch,
         FeatureFamily::Route,
         FeatureFamily::BalanceRank,
     ] {
@@ -551,43 +840,100 @@ fn pair_feature(pair: &PairScore, family: FeatureFamily) -> f64 {
         FeatureFamily::Destination => pair.destination,
         FeatureFamily::Synchrony => pair.synchrony,
         FeatureFamily::Funding => pair.funding,
+        FeatureFamily::FundingRound => pair.funding_round,
+        FeatureFamily::FundingBatch => pair.funding_batch,
         FeatureFamily::Route => pair.route,
         FeatureFamily::BalanceRank => pair.balance_rank,
     }
 }
 
 fn aggregate(results: &[SeedResult]) -> Vec<AggregateResult> {
-    let mut groups: BTreeMap<(PlannerVariant, Ablation), Vec<&SeedResult>> = BTreeMap::new();
+    let mut groups: BTreeMap<(FundingScheme, PlannerVariant, Ablation), Vec<&SeedResult>> =
+        BTreeMap::new();
     for result in results {
         groups
-            .entry((result.planner, result.ablation))
+            .entry((result.funding_scheme, result.planner, result.ablation))
             .or_default()
             .push(result);
     }
     groups
         .into_iter()
-        .map(|((planner, ablation), results)| AggregateResult {
+        .map(
+            |((funding_scheme, planner, ablation), results)| AggregateResult {
+                funding_scheme,
+                planner,
+                ablation,
+                roc_auc: metric_range(results.iter().map(|result| result.composite.binary.roc_auc)),
+                f1: metric_range(results.iter().map(|result| result.composite.binary.f1)),
+                precision_at_k: metric_range(
+                    results
+                        .iter()
+                        .map(|result| result.composite.binary.precision_at_k),
+                ),
+                adjusted_rand: metric_range(
+                    results
+                        .iter()
+                        .map(|result| result.composite.clustering.adjusted_rand),
+                ),
+                normalized_mutual_information: metric_range(
+                    results
+                        .iter()
+                        .map(|result| result.composite.clustering.normalized_mutual_information),
+                ),
+            },
+        )
+        .collect()
+}
+
+fn funding_summary(results: &[SeedResult]) -> Vec<FundingSummary> {
+    let mut groups: BTreeMap<(FundingScheme, PlannerVariant), Vec<&SeedResult>> = BTreeMap::new();
+    for result in results
+        .iter()
+        .filter(|result| result.ablation == Ablation::None)
+    {
+        groups
+            .entry((result.funding_scheme, result.planner))
+            .or_default()
+            .push(result);
+    }
+    groups
+        .into_iter()
+        .map(|((funding_scheme, planner), results)| FundingSummary {
+            funding_scheme,
             planner,
-            ablation,
-            roc_auc: metric_range(results.iter().map(|result| result.composite.binary.roc_auc)),
-            f1: metric_range(results.iter().map(|result| result.composite.binary.f1)),
-            precision_at_k: metric_range(
+            funding_roc_auc: metric_range(
                 results
                     .iter()
-                    .map(|result| result.composite.binary.precision_at_k),
+                    .map(|result| feature_auc(result, FeatureFamily::Funding)),
             ),
-            adjusted_rand: metric_range(
+            funding_round_roc_auc: metric_range(
                 results
                     .iter()
-                    .map(|result| result.composite.clustering.adjusted_rand),
+                    .map(|result| feature_auc(result, FeatureFamily::FundingRound)),
             ),
-            normalized_mutual_information: metric_range(
+            funding_batch_roc_auc: metric_range(
                 results
                     .iter()
-                    .map(|result| result.composite.clustering.normalized_mutual_information),
+                    .map(|result| feature_auc(result, FeatureFamily::FundingBatch)),
+            ),
+            funding_separation: metric_range(results.iter().map(|result| {
+                result
+                    .feature_separation
+                    .get(&FeatureFamily::Funding)
+                    .map_or(0.0, |separation| separation.separation)
+            })),
+            composite_roc_auc: metric_range(
+                results.iter().map(|result| result.composite.binary.roc_auc),
             ),
         })
         .collect()
+}
+
+fn feature_auc(result: &SeedResult, family: FeatureFamily) -> f64 {
+    result
+        .per_feature
+        .get(&family)
+        .map_or(0.0, |metrics| metrics.binary.roc_auc)
 }
 
 fn metric_range(values: impl Iterator<Item = f64>) -> MetricRange {
@@ -629,9 +975,9 @@ mod tests {
 
     fn compact_config() -> ExperimentConfig {
         ExperimentConfig {
-            controllers: 3,
-            agents_per_controller: 3,
-            days: 2,
+            controllers: 5,
+            agents_per_controller: 4,
+            days: 8,
             events_per_agent_per_day: 2,
             seeds: vec![1, 2, 3, 4, 5],
             ablations: vec![Ablation::None, Ablation::Without(FeatureFamily::Funding)],
@@ -660,17 +1006,208 @@ mod tests {
     }
 
     #[test]
-    fn common_funder_limit_remains_measurable() -> Result<(), String> {
+    fn dedicated_funding_stays_perfectly_linkable() -> Result<(), String> {
         let result = run_experiment(compact_config())?;
+        for seed in result.seeds.iter().filter(|seed| {
+            seed.ablation == Ablation::None
+                && seed.funding_scheme == FundingScheme::DedicatedPerOperator
+        }) {
+            assert!(
+                (seed.per_feature[&FeatureFamily::Funding].binary.roc_auc - 1.0).abs()
+                    < f64::EPSILON,
+                "dedicated funders must remain perfectly separating"
+            );
+            assert!(
+                (seed.per_feature[&FeatureFamily::FundingRound]
+                    .binary
+                    .roc_auc
+                    - 1.0)
+                    .abs()
+                    < f64::EPSILON,
+                "dedicated funding rounds must remain perfectly separating"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn pooled_mixed_rounds_break_the_funding_channel() -> Result<(), String> {
+        let result = run_experiment(compact_config())?;
+        for seed in result.seeds.iter().filter(|seed| {
+            seed.ablation == Ablation::None
+                && seed.funding_scheme == FundingScheme::PooledMixedRounds
+        }) {
+            let funding = seed.per_feature[&FeatureFamily::Funding].binary.roc_auc;
+            let rounds = seed.per_feature[&FeatureFamily::FundingRound]
+                .binary
+                .roc_auc;
+            let batch = seed.per_feature[&FeatureFamily::FundingBatch]
+                .binary
+                .roc_auc;
+            assert!(funding < 0.75, "pooled funding must not stay separating");
+            assert!(rounds < 0.75, "pooled rounds must not stay separating");
+            assert!(
+                batch < 0.75,
+                "the scheme-aware batch attack must not reopen the mixed pool"
+            );
+        }
+        Ok(())
+    }
+
+    /// The mitigation must hold against an adversary that knows the pooling scheme.
+    ///
+    /// The batch attack weights a shared payer-and-round batch by how few accounts were in
+    /// it, which is exactly the leverage a small batch gives someone who knows accounts are
+    /// dealt into batches. It stays at full strength on the baseline and the control.
+    #[test]
+    fn the_scheme_aware_attack_stays_strong_where_batching_follows_ownership() -> Result<(), String>
+    {
+        let result = run_experiment(compact_config())?;
+        let mean_auc = |scheme: FundingScheme, family: FeatureFamily| {
+            let values: Vec<_> = result
+                .seeds
+                .iter()
+                .filter(|seed| seed.ablation == Ablation::None && seed.funding_scheme == scheme)
+                .map(|seed| seed.per_feature[&family].binary.roc_auc)
+                .collect();
+            mean(&values)
+        };
+        let baseline = mean_auc(
+            FundingScheme::DedicatedPerOperator,
+            FeatureFamily::FundingBatch,
+        );
+        let control = mean_auc(
+            FundingScheme::PooledPerOperatorRounds,
+            FeatureFamily::FundingBatch,
+        );
+        let mitigation = mean_auc(
+            FundingScheme::PooledMixedRounds,
+            FeatureFamily::FundingBatch,
+        );
+        assert!(
+            (baseline - 1.0).abs() < f64::EPSILON,
+            "the batch attack must stay perfect on the dedicated baseline: {baseline}"
+        );
+        assert!(
+            control > mitigation + 0.2,
+            "the batch attack must still read operator-grouped batches: {control} vs {mitigation}"
+        );
+        Ok(())
+    }
+
+    /// The result must not depend on the specific top-up count or disburser count chosen.
+    #[test]
+    fn the_mixed_pool_holds_across_funding_parameters() -> Result<(), String> {
+        for funding in [
+            FundingModel {
+                disbursers: 2,
+                round_hours: 24,
+                top_ups_per_account: 1,
+                denomination_lamports: 600_000_000,
+            },
+            FundingModel {
+                disbursers: 3,
+                round_hours: 12,
+                top_ups_per_account: 7,
+                denomination_lamports: 250_000_000,
+            },
+        ] {
+            let result = run_experiment(ExperimentConfig {
+                funding,
+                ..compact_config()
+            })?;
+            for seed in result.seeds.iter().filter(|seed| {
+                seed.ablation == Ablation::None
+                    && seed.funding_scheme == FundingScheme::PooledMixedRounds
+            }) {
+                for family in [
+                    FeatureFamily::Funding,
+                    FeatureFamily::FundingRound,
+                    FeatureFamily::FundingBatch,
+                ] {
+                    let auc = seed.per_feature[&family].binary.roc_auc;
+                    assert!(
+                        auc < 0.75,
+                        "{family:?} must stay near chance under {funding:?}: {auc}"
+                    );
+                }
+            }
+            for seed in result.seeds.iter().filter(|seed| {
+                seed.ablation == Ablation::None
+                    && seed.funding_scheme == FundingScheme::DedicatedPerOperator
+            }) {
+                assert!(
+                    (seed.per_feature[&FeatureFamily::Funding].binary.roc_auc - 1.0).abs()
+                        < f64::EPSILON,
+                    "the dedicated baseline must stay perfect under {funding:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn operator_batched_pool_keeps_the_channel_open() -> Result<(), String> {
+        let result = run_experiment(compact_config())?;
+        let mean_auc = |scheme: FundingScheme, family: FeatureFamily| {
+            let values: Vec<_> = result
+                .seeds
+                .iter()
+                .filter(|seed| seed.ablation == Ablation::None && seed.funding_scheme == scheme)
+                .map(|seed| seed.per_feature[&family].binary.roc_auc)
+                .collect();
+            mean(&values)
+        };
+        let control = mean_auc(
+            FundingScheme::PooledPerOperatorRounds,
+            FeatureFamily::FundingRound,
+        );
+        let mitigation = mean_auc(
+            FundingScheme::PooledMixedRounds,
+            FeatureFamily::FundingRound,
+        );
+        assert!(
+            control > mitigation + 0.2,
+            "the same pool batched per operator must stay far more linkable: {control} vs {mitigation}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn funding_scheme_changes_no_other_attacker_channel() -> Result<(), String> {
+        let result = run_experiment(compact_config())?;
+        let key = |seed: &SeedResult| (seed.planner, seed.seed, seed.ablation);
+        let baseline: BTreeMap<_, _> = result
+            .seeds
+            .iter()
+            .filter(|seed| seed.funding_scheme == FundingScheme::DedicatedPerOperator)
+            .map(|seed| (key(seed), seed))
+            .collect();
         for seed in result
             .seeds
             .iter()
-            .filter(|seed| seed.ablation == Ablation::None)
+            .filter(|seed| seed.funding_scheme != FundingScheme::DedicatedPerOperator)
         {
-            assert!(
-                (seed.per_feature[&FeatureFamily::Funding].binary.roc_auc - 1.0).abs()
-                    < f64::EPSILON
-            );
+            let reference = baseline
+                .get(&key(seed))
+                .ok_or_else(|| "missing baseline arm".to_owned())?;
+            assert_eq!(seed.events, reference.events);
+            assert_eq!(seed.pairs, reference.pairs);
+            assert_eq!(seed.action_counts, reference.action_counts);
+            for (family, metrics) in &seed.per_feature {
+                if matches!(
+                    family,
+                    FeatureFamily::Funding
+                        | FeatureFamily::FundingRound
+                        | FeatureFamily::FundingBatch
+                ) {
+                    continue;
+                }
+                assert_eq!(
+                    metrics, &reference.per_feature[family],
+                    "{family:?} must be untouched by the funding scheme"
+                );
+            }
         }
         Ok(())
     }
@@ -678,8 +1215,12 @@ mod tests {
     #[test]
     fn controller_labels_cannot_change_extracted_scores() -> Result<(), String> {
         let config = compact_config();
-        let (observations, mut truth) =
-            generate_dataset(&config, PlannerVariant::PersonaSession, 9)?;
+        let (observations, mut truth, _) = generate_dataset(
+            &config,
+            PlannerVariant::PersonaSession,
+            FundingScheme::PooledMixedRounds,
+            9,
+        )?;
         let features = extract_features(&observations.events, config.features);
         let before = score_pairs(&features, config.weights);
         for label in truth.controllers.values_mut() {

@@ -338,9 +338,15 @@ fn evaluation_writes_json_csv_and_markdown_atomically() -> Result<()> {
     let json: Value = serde_json::from_slice(&fs::read(output.join("evaluation.json"))?)?;
     assert_eq!(json["config"]["seeds"].as_array().map(Vec::len), Some(5));
     let csv = fs::read_to_string(output.join("evaluation.csv"))?;
-    assert!(csv.starts_with("planner,seed,ablation"));
+    assert!(csv.starts_with("funding_scheme,planner,seed,ablation"));
     let markdown = fs::read_to_string(output.join("evaluation.md"))?;
-    assert!(markdown.contains("common-funder graph remains directly observable"));
+    assert!(markdown.contains("do not establish transaction-graph anonymity"));
+    assert!(markdown.contains("## Funding Provenance"));
+    assert!(markdown.contains("Funding batch AUC mean"));
+    assert_eq!(
+        json["config"]["funding_schemes"].as_array().map(Vec::len),
+        Some(3)
+    );
 
     let repeat = Cli::try_parse_from([
         "cooker",

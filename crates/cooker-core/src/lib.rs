@@ -19,6 +19,7 @@ pub mod config;
 pub mod contracts;
 pub mod domain;
 pub mod error;
+pub mod funding;
 pub mod persona;
 pub mod rng;
 pub mod safety;
@@ -32,6 +33,7 @@ pub use config::{BudgetConfig, CookerConfig, NetworkConfig, RuntimeConfig};
 pub use contracts::{ActionAdapter, BehaviorModel, ChainGateway, Policy, StateStore};
 pub use domain::*;
 pub use error::{CookerError, ErrorClass};
+pub use funding::{FundingPlan, FundingScheme, FundingTopUp, OperatorAccount, PooledFundingConfig};
 pub use persona::{
     ActionWeight, ActiveWindow, AmountProfile, DurationRange, PersonaConfig, PersonaPreset,
     StateDurations, StateTransition,

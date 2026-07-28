@@ -372,6 +372,8 @@ mod tests {
             destination: score,
             synchrony: score,
             funding: score,
+            funding_round: score,
+            funding_batch: score,
             route: score,
             balance_rank: score,
             composite: score,
