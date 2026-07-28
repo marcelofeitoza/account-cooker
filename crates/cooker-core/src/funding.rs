@@ -12,9 +12,10 @@
 //! batches each operator separately, and [`FundingScheme::DedicatedPerOperator`] is the
 //! baseline star topology.
 //!
-//! These schedules are measured by the evaluator. They are not wired into the runtime
-//! funding path, which still pays each account from the operator wallet, and this module
-//! implements no pool, custody, or transfer execution of any kind.
+//! The evaluator measures these schedules, and the runtime funding coordinator consumes the
+//! same [`FundingPlan`] to build durable native transfers. This module remains policy-only:
+//! payer indexes become local signer routes in the runtime, while pool deposits, custody, and
+//! transfer execution stay outside this crate.
 
 use std::collections::{BTreeMap, BTreeSet};
 

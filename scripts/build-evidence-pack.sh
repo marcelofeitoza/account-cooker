@@ -264,13 +264,15 @@ jq -n \
     }),
     funding: {
       preview: ($fund_preview | {
-        mode, fleet_agents, lamports_per_agent, network_preflight,
-        signer_loaded, state_changed
+        mode, funding_scheme, operator_fleets, fleet_agents, disbursers,
+        denomination_lamports, scheduled_transfers, disburser_requirements, pool_deposits,
+        network_preflight, signer_loaded, state_changed
       }),
       execute: ($fund_execute | {
-        mode, fleet_agents, lamports_per_agent, actions_inserted,
-        claimed_actions, recovery_claimed, workers, network_preflight,
-        signer_loaded, stop_reason, state_changed
+        mode, funding_scheme, operator_fleets, fleet_agents, disbursers,
+        denomination_lamports, scheduled_transfers, disburser_requirements, pool_deposits,
+        actions_inserted, claimed_actions, recovery_claimed, workers,
+        network_preflight, signer_loaded, stop_reason, state_changed
       }),
       idempotent_replay: ($fund_replay | {
         mode, actions_inserted, claimed_actions, recovery_claimed, workers,
@@ -1099,7 +1101,7 @@ Full-attacker ROC AUC means were ${naive_auc} for naive uniform, ${independent_a
 
 ## Interpretation Bound
 
-The common-funder graph remains directly observable. The evaluator is synthetic and does not establish anonymity. Jupiter uses a reviewed pinned state snapshot, native stake is used instead of Marinade, and local Surfpool does not reproduce public-network topology or execution quality. All chain transactions in this pack were signed and executed only against loopback Surfpool. Full local signatures, databases, generated signers, and raw logs are excluded from this pack.
+The canonical full-demo record uses the direct funding default, so its common-funder graph remains directly observable. The pooled runtime path is not exercised by this evidence pack, and the evaluator is synthetic, so neither record establishes anonymity. Jupiter uses a reviewed pinned state snapshot, native stake is used instead of Marinade, and local Surfpool does not reproduce public-network topology or execution quality. All chain transactions in this pack were signed and executed only against loopback Surfpool. Full local signatures, databases, generated signers, and raw logs are excluded from this pack.
 REPORT
 
 cat >"${staging}/test-summary.txt" <<SUMMARY

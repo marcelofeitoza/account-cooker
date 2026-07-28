@@ -111,6 +111,7 @@ has no `lint_policy` key, while a fresh canonical run emits one.
 |---|---|---|
 | network guard | unit plus live doctor | public/non-Surfpool RPC fails before signer load |
 | clean bootstrap | full demo | generated fleet, funding, manifest, and balances agree |
+| pooled funding routing | policy-aware mocked gateway runtime plus CLI preview | one global multi-fleet schedule preserves payer, denomination, round order, signer route, exact per-disburser budgets, and transfer count |
 | native transfer | Surfpool acceptance | exact source, destination, and fee deltas |
 | SPL transfer | Surfpool acceptance | ATA creation, ownership, mint, and exact token delta |
 | Jupiter swap | pinned Surfpool state | bounded deltas, allowlisted route, local signer rebinding |
@@ -321,6 +322,8 @@ README, CLI help, architecture, threat model, and evidence must agree on:
 - scale actually tested;
 - metrics actually reported;
 - funding-provenance limitation and the schemes it was measured under;
+- direct versus pooled runtime funding, including external pool deposits and synthetic-only
+  measurement scope;
 - safety exclusions;
 - review status.
 

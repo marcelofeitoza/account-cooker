@@ -41,6 +41,8 @@ max_account_creation_lamports = 10000000
 enabled_actions = ["native_transfer"]
 confirmation_timeout_seconds = 30
 confirmation_audit_age_seconds = 300
+# `cooker fund` uses this as the direct amount or pooled fixed denomination.
+# Direct funding is the default; pooled topology and round settings are explicit CLI options.
 funding_lamports_per_agent = 600000000
 kill_switch_file = ".surfpool/KILL_SWITCH"
 

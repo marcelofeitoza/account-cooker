@@ -16,13 +16,14 @@ use std::{
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, TimeDelta, Utc};
 use cooker_core::{
-    ActionAdapter, ActionId, ActionKind, ActionPayload, AdapterContext, AgentId, AgentSnapshot,
-    BudgetConfig, ChainGateway, Clock, CookerError, PersonaBehaviorModel, PlannedAction, Policy,
-    PolicyConfig, RunId, SafetyPolicy, SessionState, StateStore, SystemClock,
+    ActionAdapter, ActionKind, ActionState, AdapterContext, AgentId, AgentSnapshot, BudgetConfig,
+    ChainGateway, Clock, CookerError, FundingPlan, FundingScheme, OperatorAccount,
+    PersonaBehaviorModel, Policy, PolicyConfig, PooledFundingConfig, RunId, SafetyPolicy,
+    SessionState, StateStore, SystemClock,
 };
 use cooker_runtime::{
-    FleetRuntime, NoFaults, PlannerFleet, PlanningSummary, RuntimeEngine, RuntimeSettings,
-    WorkerSummary,
+    DisburserBudget, FleetRuntime, FundingExecutionPlan, FundingRecipient, NoFaults, PlannerFleet,
+    PlanningSummary, RuntimeEngine, RuntimeSettings, WorkerSummary,
 };
 use cooker_solana::{
     FleetManifest, JupiterAdapter, JupiterApiClient, JupiterPolicy, LocalKeypair,
@@ -34,10 +35,15 @@ use solana_pubkey::Pubkey;
 use tokio::{sync::watch, task::JoinHandle, time::MissedTickBehavior};
 use uuid::Uuid;
 
-use crate::config::{FileConfig, JupiterFileConfig, parse_seed};
+use crate::{
+    FundingCommandScheme,
+    config::{FileConfig, JupiterFileConfig, parse_seed},
+};
 
 const MODEL_VERSION: &str = "behavior-v1";
-const FUNDING_MODEL_VERSION: &str = "surfpool-funding-v1";
+const FUNDING_MODEL_VERSION: &str = "surfpool-funding-v2";
+const MAX_FUNDING_RECIPIENTS: usize = 10_000;
+const MAX_FUNDING_TRANSFERS: usize = 100_000;
 const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111111112";
 const DESTINATIONS_PER_AGENT: usize = 8;
 const STOP_NONE: u8 = 0;
@@ -101,19 +107,38 @@ struct WorkerReport {
 
 impl From<WorkerSummary> for WorkerReport {
     fn from(value: WorkerSummary) -> Self {
-        Self {
-            confirmed: value.confirmed,
-            audited: value.audited,
-            orphaned: value.orphaned,
-            rejected: value.rejected,
-            delayed: value.delayed,
-            unknown: value.unknown,
-            expired: value.expired,
-            failed: value.failed,
-            errors: value.errors,
-            peak_workers: value.peak_workers,
-            released_without_start: value.released_without_start,
-        }
+        let mut report = Self::default();
+        report.absorb(value);
+        report
+    }
+}
+
+impl WorkerReport {
+    fn absorb(&mut self, value: WorkerSummary) {
+        self.confirmed += value.confirmed;
+        self.audited += value.audited;
+        self.orphaned += value.orphaned;
+        self.rejected += value.rejected;
+        self.delayed += value.delayed;
+        self.unknown += value.unknown;
+        self.expired += value.expired;
+        self.failed += value.failed;
+        self.errors.extend(value.errors);
+        self.peak_workers = self.peak_workers.max(value.peak_workers);
+        self.released_without_start += value.released_without_start;
+    }
+
+    fn all_claimed_confirmed(&self, claimed: usize) -> bool {
+        self.confirmed == claimed
+            && self.audited == 0
+            && self.orphaned == 0
+            && self.rejected == 0
+            && self.delayed == 0
+            && self.unknown == 0
+            && self.expired == 0
+            && self.failed == 0
+            && self.errors.is_empty()
+            && self.released_without_start == 0
     }
 }
 
@@ -145,10 +170,20 @@ struct FundingReport {
     mode: &'static str,
     database: String,
     surfnet_id: String,
-    fleet_run_id: RunId,
+    funding_scheme: FundingScheme,
+    fleet_run_ids: Vec<RunId>,
     funding_run_id: RunId,
+    operator_fleets: usize,
     fleet_agents: usize,
-    lamports_per_agent: u64,
+    disbursers: usize,
+    rounds: u32,
+    top_ups_per_account: usize,
+    denomination_lamports: u64,
+    round_interval_seconds: u64,
+    scheduled_transfers: usize,
+    scheduled_principal_lamports: u64,
+    disburser_requirements: Vec<FundingDisburserRequirement>,
+    pool_deposits: &'static str,
     action_limit: usize,
     actions_inserted: usize,
     claimed_actions: usize,
@@ -160,6 +195,36 @@ struct FundingReport {
     signer_loaded: bool,
     stop_reason: Option<&'static str>,
     state_changed: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct FundingDisburserRequirement {
+    payer_index: usize,
+    scheduled_transfers: usize,
+    principal_lamports: u64,
+    fee_ceiling_lamports: u64,
+    reserve_lamports: u64,
+    required_balance_lamports: u64,
+}
+
+#[derive(Debug)]
+struct FundingRoster {
+    roots: Vec<PathBuf>,
+    fleet_run_ids: Vec<RunId>,
+    recipients: Vec<FundingRecipient>,
+    epoch: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+struct FundingWorkflow {
+    roster: FundingRoster,
+    schedule: FundingPlan,
+    execution: FundingExecutionPlan,
+    funding_run_id: RunId,
+    disburser_agents: Vec<AgentId>,
+    signer_paths: Vec<PathBuf>,
+    schedule_seed: [u8; 32],
+    round_interval_seconds: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -214,7 +279,13 @@ pub(crate) fn fund(
     project_root: &Path,
     database: &Path,
     funder_path: &Path,
+    scheme: FundingCommandScheme,
+    recipient_project_roots: &[PathBuf],
+    disburser_paths: &[PathBuf],
     lamports_per_agent: Option<u64>,
+    funding_rounds: u32,
+    top_ups_per_account: usize,
+    round_interval_seconds: u64,
     limit: usize,
     execute: bool,
     output: &mut impl Write,
@@ -226,16 +297,276 @@ pub(crate) fn fund(
     let root = canonical_root(project_root)?;
     ensure_operator_stop_clear(&file, &root)?;
     let database = resolve_path(&root, database);
-    let funder_path = resolve_path(&root, funder_path);
     let amount = lamports_per_agent.unwrap_or(file.online.funding_lamports_per_agent);
     if amount == 0 {
         bail!("fund requires a positive lamports-per-agent value");
     }
+    let workflow = build_funding_workflow(
+        &file,
+        &root,
+        funder_path,
+        scheme,
+        recipient_project_roots,
+        disburser_paths,
+        amount,
+        funding_rounds,
+        top_ups_per_account,
+        round_interval_seconds,
+    )?;
     if execute {
-        execute_funding(&file, &root, &database, &funder_path, amount, limit, output)
+        execute_funding(&file, &root, &database, &workflow, limit, output)
     } else {
-        preview_funding(&file, &root, &database, amount, limit, output)
+        preview_funding(&file, &database, &workflow, limit, output)
     }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "funding CLI inputs are validated together before preview or execution"
+)]
+fn build_funding_workflow(
+    file: &FileConfig,
+    root: &Path,
+    funder_path: &Path,
+    scheme: FundingCommandScheme,
+    recipient_project_roots: &[PathBuf],
+    disburser_paths: &[PathBuf],
+    denomination_lamports: u64,
+    funding_rounds: u32,
+    top_ups_per_account: usize,
+    round_interval_seconds: u64,
+) -> Result<FundingWorkflow> {
+    let recipient_roots = funding_recipient_roots(root, recipient_project_roots)?;
+    let roster = load_funding_roster(file, &recipient_roots)?;
+    let (config, signer_paths, effective_interval) = match scheme {
+        FundingCommandScheme::DedicatedPerOperator => {
+            if roster.fleet_run_ids.len() != 1 {
+                bail!("dedicated funding accepts exactly one recipient fleet");
+            }
+            if roster
+                .roots
+                .first()
+                .is_none_or(|recipient_root| recipient_root != root)
+            {
+                bail!("dedicated funding accepts only the current project fleet");
+            }
+            if roster.fleet_run_ids.first().copied()
+                != Some(crate::commands::execution_run_id(file))
+            {
+                bail!("fleet manifest run identity differs from configuration");
+            }
+            if file
+                .online
+                .enabled_actions
+                .contains(&ActionKind::NativeTransfer)
+                && roster.recipients.len() < 2
+            {
+                bail!("native fleet execution requires at least two distinct agent signers");
+            }
+            if !disburser_paths.is_empty() {
+                bail!("dedicated funding does not accept pooled disburser keys");
+            }
+            (
+                PooledFundingConfig {
+                    disbursers: 1,
+                    rounds: 1,
+                    top_ups_per_account: 1,
+                    denomination_lamports,
+                },
+                vec![resolve_path(root, funder_path)],
+                0,
+            )
+        }
+        FundingCommandScheme::PooledMixedRounds => {
+            if roster.fleet_run_ids.len() < 2 {
+                bail!("pooled mixed funding requires at least two recipient fleet roots");
+            }
+            if disburser_paths.len() < 2 {
+                bail!("pooled mixed funding requires at least two disburser keys");
+            }
+            if disburser_paths.len() > roster.recipients.len() {
+                bail!("pooled mixed funding cannot use more disbursers than recipients");
+            }
+            (
+                PooledFundingConfig {
+                    disbursers: disburser_paths.len(),
+                    rounds: funding_rounds,
+                    top_ups_per_account,
+                    denomination_lamports,
+                },
+                disburser_paths
+                    .iter()
+                    .map(|path| resolve_path(root, path))
+                    .collect(),
+                round_interval_seconds,
+            )
+        }
+    };
+    if signer_paths.iter().collect::<BTreeSet<_>>().len() != signer_paths.len() {
+        bail!("funding signer paths must be unique");
+    }
+    config
+        .validate()
+        .map_err(anyhow::Error::msg)
+        .context("runtime funding schedule is invalid")?;
+    let scheduled_transfers = roster
+        .recipients
+        .len()
+        .checked_mul(config.top_ups_per_account)
+        .context("runtime funding transfer count overflow")?;
+    if scheduled_transfers > MAX_FUNDING_TRANSFERS {
+        bail!(
+            "runtime funding schedule exceeds the {MAX_FUNDING_TRANSFERS}-transfer safety ceiling"
+        );
+    }
+    let schedule_seed = funding_schedule_seed(file, &roster.fleet_run_ids)?;
+    let schedule = match scheme {
+        FundingCommandScheme::DedicatedPerOperator => {
+            let operator = roster
+                .fleet_run_ids
+                .first()
+                .context("dedicated funding roster is empty")?
+                .to_string();
+            let accounts: Vec<_> = roster
+                .recipients
+                .iter()
+                .map(|recipient| OperatorAccount {
+                    account: recipient.account,
+                    operator: operator.clone(),
+                })
+                .collect();
+            FundingPlan::dedicated_per_operator(&accounts, config, &schedule_seed)
+        }
+        FundingCommandScheme::PooledMixedRounds => {
+            let accounts: Vec<_> = roster
+                .recipients
+                .iter()
+                .map(|recipient| recipient.account)
+                .collect();
+            FundingPlan::pooled_mixed_rounds(&accounts, config, &schedule_seed)
+        }
+    }
+    .map_err(anyhow::Error::msg)
+    .context("failed to build runtime funding schedule")?;
+    let funding_run_id = funding_run_id(&roster.fleet_run_ids);
+    let disburser_agents = (0..signer_paths.len())
+        .map(|index| {
+            u64::try_from(index)
+                .map(|index| AgentId::derive(funding_run_id, index))
+                .context("funding disburser index does not fit u64")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let execution = FundingExecutionPlan::new(
+        &schedule,
+        &roster.recipients,
+        &disburser_agents,
+        funding_run_id,
+        FUNDING_MODEL_VERSION,
+        roster.epoch,
+        Duration::from_secs(effective_interval),
+        file.core.budgets.max_fee_lamports,
+    )
+    .map_err(anyhow::Error::msg)
+    .context("failed to materialize runtime funding actions")?;
+
+    Ok(FundingWorkflow {
+        roster,
+        schedule,
+        execution,
+        funding_run_id,
+        disburser_agents,
+        signer_paths,
+        schedule_seed,
+        round_interval_seconds: effective_interval,
+    })
+}
+
+fn funding_recipient_roots(root: &Path, requested: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let candidates = if requested.is_empty() {
+        vec![root.to_path_buf()]
+    } else {
+        requested
+            .iter()
+            .map(|path| resolve_path(root, path))
+            .collect()
+    };
+    let mut seen = BTreeSet::new();
+    let mut roots = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        let canonical = canonical_root(&candidate)?;
+        if !seen.insert(canonical.clone()) {
+            bail!("funding recipient fleet roots must be unique");
+        }
+        roots.push(canonical);
+    }
+    Ok(roots)
+}
+
+fn load_funding_roster(file: &FileConfig, roots: &[PathBuf]) -> Result<FundingRoster> {
+    let mut manifests = Vec::with_capacity(roots.len());
+    for root in roots {
+        let manifest = FleetManifest::load_public(root)
+            .map_err(anyhow::Error::msg)
+            .with_context(|| {
+                format!(
+                    "failed to load funding recipient manifest from {}",
+                    root.display()
+                )
+            })?;
+        if manifest.surfnet_id() != file.core.network.surfnet_id {
+            bail!("funding recipient manifest Surfnet identity differs from configuration");
+        }
+        manifests.push(manifest);
+    }
+    manifests.sort_by_key(FleetManifest::run_id);
+    let fleet_run_ids: Vec<_> = manifests.iter().map(FleetManifest::run_id).collect();
+    if fleet_run_ids.iter().copied().collect::<BTreeSet<_>>().len() != fleet_run_ids.len() {
+        bail!("funding recipient manifests must have distinct run identities");
+    }
+    let epoch = manifests
+        .iter()
+        .map(FleetManifest::created_at)
+        .max()
+        .context("funding recipient roster is empty")?;
+    let mut accounts = BTreeSet::new();
+    let mut destinations = BTreeSet::new();
+    let mut recipients = Vec::new();
+    for manifest in &manifests {
+        for entry in manifest.entries() {
+            parse_pubkey(&entry.public_key, "funding recipient")?;
+            if !accounts.insert(entry.agent_id) {
+                bail!("funding recipient accounts must be unique across fleet roots");
+            }
+            if !destinations.insert(entry.public_key.as_str()) {
+                bail!("funding recipient addresses must be unique across fleet roots");
+            }
+            recipients.push(FundingRecipient {
+                account: entry.agent_id,
+                destination: entry.public_key.clone(),
+            });
+        }
+    }
+    if recipients.is_empty() || recipients.len() > MAX_FUNDING_RECIPIENTS {
+        bail!("funding recipient roster must contain 1..={MAX_FUNDING_RECIPIENTS} accounts");
+    }
+    Ok(FundingRoster {
+        roots: roots.to_vec(),
+        fleet_run_ids,
+        recipients,
+        epoch,
+    })
+}
+
+fn funding_schedule_seed(file: &FileConfig, fleet_run_ids: &[RunId]) -> Result<[u8; 32]> {
+    let master = parse_seed(&file.core.seed_hex)?;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&master);
+    hasher.update(b"runtime-funding-schedule-v1");
+    for run_id in fleet_run_ids {
+        hasher.update(run_id.0.as_bytes());
+    }
+    Ok(*hasher.finalize().as_bytes())
 }
 
 pub(crate) fn recover(
@@ -396,14 +727,11 @@ fn execute_run(
 
 fn preview_funding(
     file: &FileConfig,
-    root: &Path,
     database: &Path,
-    amount: u64,
+    workflow: &FundingWorkflow,
     limit: usize,
     output: &mut impl Write,
 ) -> Result<()> {
-    let manifest = load_public_manifest(file, root)?;
-    let funding_run_id = funding_run_id(manifest.run_id());
     let snapshot = if database.is_file() {
         Some(
             open_read_only_store(file, database)?
@@ -413,15 +741,26 @@ fn preview_funding(
     } else {
         None
     };
+    let config = workflow.schedule.config();
     let report = FundingReport {
-        schema_version: 1,
+        schema_version: 2,
         mode: "preview",
         database: database.display().to_string(),
         surfnet_id: file.core.network.surfnet_id.clone(),
-        fleet_run_id: manifest.run_id(),
-        funding_run_id,
-        fleet_agents: manifest.entries().len(),
-        lamports_per_agent: amount,
+        funding_scheme: workflow.schedule.scheme(),
+        fleet_run_ids: workflow.roster.fleet_run_ids.clone(),
+        funding_run_id: workflow.funding_run_id,
+        operator_fleets: workflow.roster.fleet_run_ids.len(),
+        fleet_agents: workflow.roster.recipients.len(),
+        disbursers: workflow.disburser_agents.len(),
+        rounds: config.rounds,
+        top_ups_per_account: config.top_ups_per_account,
+        denomination_lamports: config.denomination_lamports,
+        round_interval_seconds: workflow.round_interval_seconds,
+        scheduled_transfers: workflow.execution.actions().len(),
+        scheduled_principal_lamports: funding_principal(&workflow.execution)?,
+        disburser_requirements: funding_disburser_requirements(file, workflow)?,
+        pool_deposits: pool_deposit_scope(workflow.schedule.scheme()),
         action_limit: limit,
         actions_inserted: 0,
         claimed_actions: 0,
@@ -442,8 +781,7 @@ fn execute_funding(
     file: &FileConfig,
     root: &Path,
     database: &Path,
-    funder_path: &Path,
-    amount: u64,
+    workflow: &FundingWorkflow,
     limit: usize,
     output: &mut impl Write,
 ) -> Result<()> {
@@ -452,7 +790,9 @@ fn execute_funding(
         let (stop_monitor, stop) = spawn_operator_stop_monitor(kill_switch_path(file, root));
         let gateway = connect_surfpool(file).await?;
         fail_if_operator_stopped(&stop_monitor)?;
-        let manifest = load_private_manifest(file, root)?;
+        validate_direct_funding_recipients(file, workflow)?;
+        let disbursers = load_funding_signers(root, &workflow.signer_paths)?;
+        validate_funding_signers(&disbursers, &workflow.roster.recipients)?;
         if let Some(parent) = database.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
                 format!(
@@ -462,66 +802,52 @@ fn execute_funding(
             })?;
         }
         let store = open_writable_store(file, database)?;
-        let funder = Arc::new(
-            LocalKeypair::load(root, funder_path)
-                .map_err(anyhow::Error::msg)
-                .context("failed to load Surfpool funder after network preflight")?,
-        );
         let now = Utc::now();
-        let funding_epoch = manifest.created_at();
-        let funding_run_id = funding_run_id(manifest.run_id());
-        let funding_agent_id = AgentId::derive(funding_run_id, 0);
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         let fleet = build_funding_runtime(
             file,
-            &manifest,
+            &workflow.roster.recipients,
             &store,
             &gateway,
-            &funder,
-            funding_agent_id,
-            amount,
+            &disbursers,
+            &workflow.disburser_agents,
+            workflow.execution.disburser_budgets(),
+            workflow.schedule.config().denomination_lamports,
             Arc::clone(&clock),
         )?;
         fail_if_operator_stopped(&stop_monitor)?;
-        let registration_changed = register_funding_run(
-            &store,
-            funding_run_id,
-            funding_agent_id,
-            manifest.run_id(),
-            amount,
-            manifest.entries().len(),
-            funding_epoch,
-        )?;
+        let registration_changed =
+            register_funding_run(&store, workflow, &disbursers, workflow.roster.epoch)?;
 
         store
             .release_expired_leases(now)
             .map_err(anyhow::Error::msg)?;
-        let recovery_leases = store
-            .claim_reconciliation_candidates(
-                &worker_id("fund-recover"),
-                now,
-                lease_until(file, now)?,
-                limit,
-            )
-            .map_err(anyhow::Error::msg)?;
-        let recovery_claimed = recovery_leases.len();
-        let recovery: WorkerReport = Arc::clone(&fleet)
-            .reconcile_claimed(recovery_leases, stop.clone())
-            .await
-            .into();
-        if !recovery.errors.is_empty() {
+        let (recovery_claimed, recovery) =
+            reconcile_funding_until_limit(file, &store, &fleet, &clock, &stop, limit).await?;
+        if !recovery.all_claimed_confirmed(recovery_claimed) {
             let snapshot = store
                 .status_snapshot(clock.now(), None)
                 .map_err(anyhow::Error::msg)?;
+            let config = workflow.schedule.config();
             let report = FundingReport {
-                schema_version: 1,
+                schema_version: 2,
                 mode: "execute",
                 database: database.display().to_string(),
                 surfnet_id: file.core.network.surfnet_id.clone(),
-                fleet_run_id: manifest.run_id(),
-                funding_run_id,
-                fleet_agents: manifest.entries().len(),
-                lamports_per_agent: amount,
+                funding_scheme: workflow.schedule.scheme(),
+                fleet_run_ids: workflow.roster.fleet_run_ids.clone(),
+                funding_run_id: workflow.funding_run_id,
+                operator_fleets: workflow.roster.fleet_run_ids.len(),
+                fleet_agents: workflow.roster.recipients.len(),
+                disbursers: workflow.disburser_agents.len(),
+                rounds: config.rounds,
+                top_ups_per_account: config.top_ups_per_account,
+                denomination_lamports: config.denomination_lamports,
+                round_interval_seconds: workflow.round_interval_seconds,
+                scheduled_transfers: workflow.execution.actions().len(),
+                scheduled_principal_lamports: funding_principal(&workflow.execution)?,
+                disburser_requirements: funding_disburser_requirements(file, workflow)?,
+                pool_deposits: pool_deposit_scope(workflow.schedule.scheme()),
                 action_limit: limit,
                 actions_inserted: 0,
                 claimed_actions: 0,
@@ -535,7 +861,7 @@ fn execute_funding(
                 state_changed: registration_changed || recovery_claimed != 0,
             };
             write_json(output, &report)?;
-            bail!("funding reconciliation failed; no new funding actions were claimed");
+            bail!("funding reconciliation did not confirm every claimed action");
         }
         let remaining = store
             .recovery_preview(clock.now(), None, 0)
@@ -543,52 +869,55 @@ fn execute_funding(
         if remaining.counts.reconciliation_candidates != 0 {
             bail!("funding recovery remains incomplete; repeat the bounded fund command");
         }
+        reject_terminal_funding_actions(&store, &workflow.execution)?;
+        fail_if_operator_stopped(&stop_monitor)?;
+        preflight_funding_balances(
+            file,
+            &gateway,
+            &store,
+            &disbursers,
+            &workflow.disburser_agents,
+            workflow.execution.disburser_budgets(),
+            clock.now(),
+            &stop,
+        )
+        .await?;
 
         let mut actions_inserted = 0;
-        if !*stop.borrow() {
-            for entry in manifest.entries() {
-                let action = funding_action(
-                    funding_run_id,
-                    funding_agent_id,
-                    entry.index,
-                    &entry.public_key,
-                    amount,
-                    file.core.budgets.max_fee_lamports,
-                    funding_epoch,
-                );
-                actions_inserted +=
-                    usize::from(store.enqueue_action(&action).map_err(anyhow::Error::msg)?);
+        for action in workflow.execution.actions() {
+            if *stop.borrow() {
+                break;
             }
+            actions_inserted +=
+                usize::from(store.enqueue_action(action).map_err(anyhow::Error::msg)?);
         }
-        let claimed_at = clock.now();
-        let leases = if *stop.borrow() {
-            Vec::new()
-        } else {
-            store
-                .claim_due_actions(
-                    &worker_id("fund"),
-                    claimed_at,
-                    lease_until(file, claimed_at)?,
-                    limit,
-                )
-                .map_err(anyhow::Error::msg)?
-        };
-        let claimed_actions = leases.len();
-        let workers: WorkerReport = fleet.run_claimed(leases, stop.clone()).await.into();
+        let (claimed_actions, workers) =
+            execute_funding_until_limit(file, &store, &fleet, &clock, &stop, limit).await?;
         let snapshot = store
             .status_snapshot(clock.now(), None)
             .map_err(anyhow::Error::msg)?;
-        let has_errors = !workers.errors.is_empty();
+        let has_errors = !workers.all_claimed_confirmed(claimed_actions);
         let stop_reason = stop_monitor.reason();
+        let config = workflow.schedule.config();
         let report = FundingReport {
-            schema_version: 1,
+            schema_version: 2,
             mode: "execute",
             database: database.display().to_string(),
             surfnet_id: file.core.network.surfnet_id.clone(),
-            fleet_run_id: manifest.run_id(),
-            funding_run_id,
-            fleet_agents: manifest.entries().len(),
-            lamports_per_agent: amount,
+            funding_scheme: workflow.schedule.scheme(),
+            fleet_run_ids: workflow.roster.fleet_run_ids.clone(),
+            funding_run_id: workflow.funding_run_id,
+            operator_fleets: workflow.roster.fleet_run_ids.len(),
+            fleet_agents: workflow.roster.recipients.len(),
+            disbursers: workflow.disburser_agents.len(),
+            rounds: config.rounds,
+            top_ups_per_account: config.top_ups_per_account,
+            denomination_lamports: config.denomination_lamports,
+            round_interval_seconds: workflow.round_interval_seconds,
+            scheduled_transfers: workflow.execution.actions().len(),
+            scheduled_principal_lamports: funding_principal(&workflow.execution)?,
+            disburser_requirements: funding_disburser_requirements(file, workflow)?,
+            pool_deposits: pool_deposit_scope(workflow.schedule.scheme()),
             action_limit: limit,
             actions_inserted,
             claimed_actions,
@@ -609,10 +938,91 @@ fn execute_funding(
             bail!("operator stop activated by {reason}; in-flight funding work settled");
         }
         if has_errors {
-            bail!("one or more funding workers failed; rerun fund --execute to reconcile first");
+            bail!("funding pass did not confirm every claimed action; inspect the JSON report");
         }
         Ok(())
     })
+}
+
+async fn reconcile_funding_until_limit(
+    file: &FileConfig,
+    store: &Store,
+    fleet: &Arc<FleetRuntime>,
+    clock: &Arc<dyn Clock>,
+    stop: &watch::Receiver<bool>,
+    limit: usize,
+) -> Result<(usize, WorkerReport)> {
+    let worker = worker_id("fund-recover");
+    let mut claimed = 0;
+    let mut report = WorkerReport::default();
+    while claimed < limit && !*stop.borrow() {
+        let claimed_at = clock.now();
+        let leases = store
+            .claim_reconciliation_candidates(&worker, claimed_at, lease_until(file, claimed_at)?, 1)
+            .map_err(anyhow::Error::msg)?;
+        if leases.is_empty() {
+            break;
+        }
+        claimed += leases.len();
+        report.absorb(
+            Arc::clone(fleet)
+                .reconcile_claimed(leases, stop.clone())
+                .await,
+        );
+        if !report.all_claimed_confirmed(claimed) {
+            break;
+        }
+    }
+    Ok((claimed, report))
+}
+
+async fn execute_funding_until_limit(
+    file: &FileConfig,
+    store: &Store,
+    fleet: &Arc<FleetRuntime>,
+    clock: &Arc<dyn Clock>,
+    stop: &watch::Receiver<bool>,
+    limit: usize,
+) -> Result<(usize, WorkerReport)> {
+    let worker = worker_id("fund");
+    let mut claimed = 0;
+    let mut report = WorkerReport::default();
+    while claimed < limit && !*stop.borrow() {
+        let claimed_at = clock.now();
+        let leases = store
+            .claim_due_actions(&worker, claimed_at, lease_until(file, claimed_at)?, 1)
+            .map_err(anyhow::Error::msg)?;
+        if leases.is_empty() {
+            break;
+        }
+        claimed += leases.len();
+        report.absorb(Arc::clone(fleet).run_claimed(leases, stop.clone()).await);
+        if !report.all_claimed_confirmed(claimed) {
+            break;
+        }
+    }
+    Ok((claimed, report))
+}
+
+fn reject_terminal_funding_actions(store: &Store, execution: &FundingExecutionPlan) -> Result<()> {
+    for action in execution.actions() {
+        match store.get_action_state(&action.id) {
+            Ok(
+                state @ (ActionState::Rejected
+                | ActionState::Failed
+                | ActionState::Expired
+                | ActionState::Cancelled),
+            ) => {
+                bail!(
+                    "funding action {} is terminal in state {state:?}; use a new funding database after correcting the cause",
+                    action.id
+                );
+            }
+            Ok(_) | Err(CookerError::NotFound(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 fn preview_recovery(
@@ -1061,153 +1471,277 @@ fn jupiter_client(config: &JupiterFileConfig) -> Result<JupiterApiClient> {
 #[allow(clippy::too_many_arguments)]
 fn build_funding_runtime(
     file: &FileConfig,
-    manifest: &FleetManifest,
+    recipients: &[FundingRecipient],
     store: &Arc<Store>,
     gateway: &Arc<SolanaGateway>,
-    funder: &Arc<LocalKeypair>,
-    funding_agent_id: AgentId,
-    amount: u64,
+    disbursers: &[Arc<LocalKeypair>],
+    disburser_agents: &[AgentId],
+    budgets: &BTreeMap<AgentId, DisburserBudget>,
+    denomination_lamports: u64,
     clock: Arc<dyn Clock>,
 ) -> Result<Arc<FleetRuntime>> {
-    let per_action = amount
-        .checked_add(file.core.budgets.max_fee_lamports)
-        .context("funding action ceiling overflow")?;
-    let total = per_action
-        .checked_mul(u64::try_from(manifest.entries().len())?)
-        .context("funding budget overflow")?;
-    let policy: Arc<dyn Policy> = Arc::new(
-        SafetyPolicy::new(PolicyConfig {
-            budgets: BudgetConfig {
-                daily_lamports: total,
-                lifetime_lamports: total,
-                reserve_lamports: file.core.budgets.reserve_lamports,
-                max_fee_lamports: file.core.budgets.max_fee_lamports,
-                max_account_creation_lamports: 0,
-            },
-            allowed_actions: BTreeSet::from([ActionKind::NativeTransfer]),
-            max_action_amounts: BTreeMap::from([(ActionKind::NativeTransfer, amount)]),
-            allowed_destinations: manifest
-                .entries()
-                .iter()
-                .map(|entry| entry.public_key.clone())
-                .collect(),
-            allowed_mints: BTreeSet::new(),
-            native_input_mints: BTreeSet::new(),
-            max_slippage_bps: 0,
-        })
-        .map_err(anyhow::Error::msg)?,
-    );
-    let adapter: Arc<dyn ActionAdapter> = Arc::new(NativeTransferAdapter::new(
-        Arc::clone(gateway),
-        Arc::clone(funder),
-    ));
+    if disbursers.len() != disburser_agents.len() {
+        bail!("funding signer and runtime-agent counts differ");
+    }
+    let allowed_destinations: BTreeSet<_> = recipients
+        .iter()
+        .map(|recipient| recipient.destination.clone())
+        .collect();
     let store_concrete = Arc::clone(store);
     let store_dyn: Arc<dyn StateStore> = store_concrete;
-    let gateway_concrete = Arc::clone(gateway);
-    let gateway_dyn: Arc<dyn ChainGateway> = gateway_concrete;
-    let engine = RuntimeEngine::new(
-        store_dyn.clone(),
-        gateway_dyn,
-        policy,
-        [(ActionKind::NativeTransfer, adapter)],
-        RuntimeSettings {
-            adapter_context: adapter_context(file, gateway, funder.pubkey().to_string()),
-            max_concurrency: 1,
-        },
-        Arc::new(NoFaults),
-        Arc::clone(&clock),
-    )
-    .map_err(anyhow::Error::msg)?;
-    FleetRuntime::new(
-        store_dyn,
-        BTreeMap::from([(funding_agent_id, Arc::new(engine))]),
-        1,
-        clock,
-    )
-    .map(Arc::new)
-    .map_err(anyhow::Error::msg)
+    let mut engines = BTreeMap::new();
+    for (agent_id, disburser) in disburser_agents.iter().zip(disbursers) {
+        let total = budgets
+            .get(agent_id)
+            .context("funding disburser budget is missing")?
+            .total_lamports()
+            .map_err(anyhow::Error::msg)?;
+        let policy: Arc<dyn Policy> = Arc::new(
+            SafetyPolicy::new(PolicyConfig {
+                budgets: BudgetConfig {
+                    daily_lamports: total,
+                    lifetime_lamports: total,
+                    reserve_lamports: file.core.budgets.reserve_lamports,
+                    max_fee_lamports: file.core.budgets.max_fee_lamports,
+                    max_account_creation_lamports: 0,
+                },
+                allowed_actions: BTreeSet::from([ActionKind::NativeTransfer]),
+                max_action_amounts: BTreeMap::from([(
+                    ActionKind::NativeTransfer,
+                    denomination_lamports,
+                )]),
+                allowed_destinations: allowed_destinations.clone(),
+                allowed_mints: BTreeSet::new(),
+                native_input_mints: BTreeSet::new(),
+                max_slippage_bps: 0,
+            })
+            .map_err(anyhow::Error::msg)?,
+        );
+        let adapter: Arc<dyn ActionAdapter> = Arc::new(NativeTransferAdapter::new(
+            Arc::clone(gateway),
+            Arc::clone(disburser),
+        ));
+        let gateway_concrete = Arc::clone(gateway);
+        let gateway_dyn: Arc<dyn ChainGateway> = gateway_concrete;
+        let engine = RuntimeEngine::new(
+            Arc::clone(&store_dyn),
+            gateway_dyn,
+            policy,
+            [(ActionKind::NativeTransfer, adapter)],
+            RuntimeSettings {
+                adapter_context: adapter_context(file, gateway, disburser.pubkey().to_string()),
+                max_concurrency: 1,
+            },
+            Arc::new(NoFaults),
+            Arc::clone(&clock),
+        )
+        .map_err(anyhow::Error::msg)?;
+        engines.insert(*agent_id, Arc::new(engine));
+    }
+    FleetRuntime::new(store_dyn, engines, 1, clock)
+        .map(Arc::new)
+        .map_err(anyhow::Error::msg)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn register_funding_run(
     store: &Store,
-    run_id: RunId,
-    agent_id: AgentId,
-    fleet_run_id: RunId,
-    amount: u64,
-    agents: usize,
+    workflow: &FundingWorkflow,
+    disbursers: &[Arc<LocalKeypair>],
     epoch: DateTime<Utc>,
 ) -> Result<bool> {
+    let config = workflow.schedule.config();
+    let disburser_records = workflow
+        .disburser_agents
+        .iter()
+        .zip(disbursers)
+        .map(|(agent_id, signer)| {
+            let budget = workflow
+                .execution
+                .disburser_budgets()
+                .get(agent_id)
+                .copied()
+                .context("funding disburser budget is missing")?;
+            Ok(serde_json::json!({
+                "agent_id": agent_id,
+                "public_key": signer.pubkey().to_string(),
+                "transfers": budget.transfers,
+                "principal_lamports": budget.principal_lamports,
+                "fee_ceiling_lamports": budget.fee_ceiling_lamports,
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let config = serde_json::json!({
         "purpose": "surfpool_fleet_funding",
-        "fleet_run_id": fleet_run_id,
-        "lamports_per_agent": amount,
-        "agents": agents,
+        "funding_scheme": workflow.schedule.scheme(),
+        "fleet_run_ids": workflow.roster.fleet_run_ids,
+        "recipient_roster_hash": funding_roster_hash(&workflow.roster),
+        "operator_fleets": workflow.roster.fleet_run_ids.len(),
+        "recipients": workflow.roster.recipients.len(),
+        "disbursers": disburser_records,
+        "rounds": config.rounds,
+        "top_ups_per_account": config.top_ups_per_account,
+        "denomination_lamports": config.denomination_lamports,
+        "round_epoch": epoch,
+        "round_interval_seconds": workflow.round_interval_seconds,
+        "scheduled_transfers": workflow.execution.actions().len(),
+        "pool_deposits_managed": false,
     });
     let config_bytes = serde_json::to_vec(&config).context("failed to hash funding config")?;
     let run_changed = store
         .register_run(&RunRegistration {
-            id: run_id,
+            id: workflow.funding_run_id,
             model_version: FUNDING_MODEL_VERSION.to_owned(),
             config,
             config_hash: blake3::hash(&config_bytes).to_hex().to_string(),
-            seed_hash: blake3::hash(b"surfpool-funding-has-no-random-seed")
-                .to_hex()
-                .to_string(),
+            seed_hash: blake3::hash(&workflow.schedule_seed).to_hex().to_string(),
             created_at: epoch,
         })
         .map_err(anyhow::Error::msg)?;
-    let snapshot = AgentSnapshot {
-        id: agent_id,
-        run_id,
-        next_sequence: 0,
-        next_decision_at: epoch,
-        budget_date: epoch.date_naive(),
-        session_state: SessionState::Dormant,
-        last_action_at: None,
-        remaining_daily_budget: amount
-            .checked_mul(u64::try_from(agents)?)
-            .context("funding agent budget overflow")?,
-        model_version: FUNDING_MODEL_VERSION.to_owned(),
-    };
-    let agent_changed = match store.get_agent(agent_id) {
-        Ok(existing) if existing == snapshot => false,
-        Ok(_) => bail!("funding agent metadata conflicts with its deterministic registration"),
-        Err(CookerError::NotFound(_)) => {
-            store
-                .upsert_agent(&snapshot, epoch)
-                .map_err(anyhow::Error::msg)?;
-            true
+    let mut agent_changed = false;
+    for agent_id in &workflow.disburser_agents {
+        let remaining_daily_budget = workflow
+            .execution
+            .disburser_budgets()
+            .get(agent_id)
+            .context("funding disburser budget is missing")?
+            .total_lamports()
+            .map_err(anyhow::Error::msg)?;
+        let snapshot = AgentSnapshot {
+            id: *agent_id,
+            run_id: workflow.funding_run_id,
+            next_sequence: 0,
+            next_decision_at: epoch,
+            budget_date: epoch.date_naive(),
+            session_state: SessionState::Dormant,
+            last_action_at: None,
+            remaining_daily_budget,
+            model_version: FUNDING_MODEL_VERSION.to_owned(),
+        };
+        match store.get_agent(*agent_id) {
+            Ok(existing) if existing == snapshot => {}
+            Ok(_) => {
+                bail!("funding agent metadata conflicts with its deterministic registration")
+            }
+            Err(CookerError::NotFound(_)) => {
+                store
+                    .upsert_agent(&snapshot, epoch)
+                    .map_err(anyhow::Error::msg)?;
+                agent_changed = true;
+            }
+            Err(error) => return Err(error.into()),
         }
-        Err(error) => return Err(error.into()),
-    };
+    }
     Ok(run_changed || agent_changed)
 }
 
-fn funding_action(
-    run_id: RunId,
-    agent_id: AgentId,
-    sequence: u64,
-    destination: &str,
-    lamports: u64,
-    max_fee_lamports: u64,
-    epoch: DateTime<Utc>,
-) -> PlannedAction {
-    PlannedAction {
-        id: ActionId::derive(run_id, agent_id, sequence, FUNDING_MODEL_VERSION),
-        run_id,
-        agent_id,
-        sequence,
-        model_version: FUNDING_MODEL_VERSION.to_owned(),
-        scheduled_at: epoch,
-        payload: ActionPayload::NativeTransfer {
-            destination: destination.to_owned(),
-            lamports,
-        },
-        max_fee_lamports,
-        max_account_creation_lamports: 0,
-        created_at: epoch,
+fn load_funding_signers(root: &Path, paths: &[PathBuf]) -> Result<Vec<Arc<LocalKeypair>>> {
+    paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            LocalKeypair::load(root, path)
+                .map(Arc::new)
+                .map_err(anyhow::Error::msg)
+                .with_context(|| {
+                    format!("failed to load funding disburser {index} after network preflight")
+                })
+        })
+        .collect()
+}
+
+fn validate_funding_signers(
+    disbursers: &[Arc<LocalKeypair>],
+    recipients: &[FundingRecipient],
+) -> Result<()> {
+    let public_keys: BTreeSet<_> = disbursers.iter().map(|signer| signer.pubkey()).collect();
+    if public_keys.len() != disbursers.len() {
+        bail!("funding disburser keys must have distinct public addresses");
     }
+    for recipient in recipients {
+        let destination = parse_pubkey(&recipient.destination, "funding recipient")?;
+        if public_keys.contains(&destination) {
+            bail!("funding disburser keys cannot also be recipient addresses");
+        }
+    }
+    Ok(())
+}
+
+fn validate_direct_funding_recipients(file: &FileConfig, workflow: &FundingWorkflow) -> Result<()> {
+    if workflow.schedule.scheme() != FundingScheme::DedicatedPerOperator {
+        return Ok(());
+    }
+    let root = workflow
+        .roster
+        .roots
+        .first()
+        .context("direct funding recipient root is missing")?;
+    let manifest = FleetManifest::load(root)
+        .map_err(anyhow::Error::msg)
+        .context("failed to validate direct funding recipient signers after network preflight")?;
+    verify_manifest(file, &manifest)?;
+    let recipients: Vec<_> = manifest
+        .entries()
+        .iter()
+        .map(|entry| FundingRecipient {
+            account: entry.agent_id,
+            destination: entry.public_key.clone(),
+        })
+        .collect();
+    if manifest.surfnet_id() != file.core.network.surfnet_id
+        || workflow.roster.fleet_run_ids.as_slice() != [manifest.run_id()]
+        || workflow.roster.recipients != recipients
+        || workflow.roster.epoch != manifest.created_at()
+    {
+        bail!("direct funding recipient manifest changed after schedule construction");
+    }
+    Ok(())
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the balance preflight checks each routed signer against its durable budget and stop state"
+)]
+async fn preflight_funding_balances(
+    file: &FileConfig,
+    gateway: &SolanaGateway,
+    store: &Store,
+    disbursers: &[Arc<LocalKeypair>],
+    disburser_agents: &[AgentId],
+    budgets: &BTreeMap<AgentId, DisburserBudget>,
+    at: DateTime<Utc>,
+    stop: &watch::Receiver<bool>,
+) -> Result<()> {
+    for (index, (agent_id, disburser)) in disburser_agents.iter().zip(disbursers).enumerate() {
+        if *stop.borrow() {
+            bail!("operator stop activated during funding balance preflight");
+        }
+        let total = budgets
+            .get(agent_id)
+            .context("funding disburser budget is missing")?
+            .total_lamports()
+            .map_err(anyhow::Error::msg)?;
+        let spent = store
+            .budget_usage(*agent_id, at)
+            .map_err(anyhow::Error::msg)?
+            .spent_lifetime_lamports;
+        let remaining = total
+            .checked_sub(spent)
+            .context("funding budget usage exceeds its registered ceiling")?;
+        let required = remaining
+            .checked_add(file.core.budgets.reserve_lamports)
+            .context("funding balance requirement overflow")?;
+        let balance = gateway
+            .native_balance(&disburser.pubkey().to_string())
+            .await
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("failed to read funding disburser {index} balance"))?;
+        if balance < required {
+            bail!(
+                "funding disburser {index} balance {balance} is below its principal, fee, and reserve requirement {required}"
+            );
+        }
+    }
+    Ok(())
 }
 
 async fn connect_surfpool(file: &FileConfig) -> Result<Arc<SolanaGateway>> {
@@ -1435,9 +1969,74 @@ fn worker_id(prefix: &str) -> String {
     format!("cli-{prefix}-{}-{}", std::process::id(), Uuid::new_v4())
 }
 
-fn funding_run_id(fleet_run_id: RunId) -> RunId {
+fn funding_run_id(fleet_run_ids: &[RunId]) -> RunId {
     const NAMESPACE: Uuid = Uuid::from_u128(0x575f_f512_7348_59b0_8411_57cc_a0fe_46d2);
-    RunId(Uuid::new_v5(&NAMESPACE, fleet_run_id.0.as_bytes()))
+    let mut identity = Vec::with_capacity(fleet_run_ids.len().saturating_mul(16));
+    for run_id in fleet_run_ids {
+        identity.extend_from_slice(run_id.0.as_bytes());
+    }
+    RunId(Uuid::new_v5(&NAMESPACE, &identity))
+}
+
+fn funding_roster_hash(roster: &FundingRoster) -> String {
+    let mut bindings: Vec<_> = roster.recipients.iter().collect();
+    bindings.sort_by_key(|recipient| recipient.account);
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"runtime-funding-roster-v1");
+    for recipient in bindings {
+        hasher.update(recipient.account.0.as_bytes());
+        hasher.update(recipient.destination.as_bytes());
+        hasher.update(b"\0");
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+fn funding_principal(execution: &FundingExecutionPlan) -> Result<u64> {
+    execution
+        .disburser_budgets()
+        .values()
+        .try_fold(0_u64, |total, budget| {
+            total.checked_add(budget.principal_lamports)
+        })
+        .context("funding principal overflow")
+}
+
+fn funding_disburser_requirements(
+    file: &FileConfig,
+    workflow: &FundingWorkflow,
+) -> Result<Vec<FundingDisburserRequirement>> {
+    workflow
+        .disburser_agents
+        .iter()
+        .enumerate()
+        .map(|(payer_index, agent_id)| {
+            let budget = workflow
+                .execution
+                .disburser_budgets()
+                .get(agent_id)
+                .context("funding disburser budget is missing")?;
+            let required_balance_lamports = budget
+                .total_lamports()
+                .map_err(anyhow::Error::msg)?
+                .checked_add(file.core.budgets.reserve_lamports)
+                .context("funding disburser balance requirement overflow")?;
+            Ok(FundingDisburserRequirement {
+                payer_index,
+                scheduled_transfers: budget.transfers,
+                principal_lamports: budget.principal_lamports,
+                fee_ceiling_lamports: budget.fee_ceiling_lamports,
+                reserve_lamports: file.core.budgets.reserve_lamports,
+                required_balance_lamports,
+            })
+        })
+        .collect()
+}
+
+const fn pool_deposit_scope(scheme: FundingScheme) -> &'static str {
+    match scheme {
+        FundingScheme::PooledMixedRounds | FundingScheme::PooledPerOperatorRounds => "external",
+        FundingScheme::DedicatedPerOperator => "not_applicable",
+    }
 }
 
 fn parse_pubkey(value: &str, label: &str) -> Result<Pubkey> {

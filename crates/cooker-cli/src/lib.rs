@@ -22,7 +22,7 @@ mod soak;
 use std::{io::Write, path::PathBuf};
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use tracing_subscriber::EnvFilter;
 
 /// Account Cooker command-line arguments.
@@ -32,6 +32,16 @@ pub struct Cli {
     /// Selected operation.
     #[command(subcommand)]
     pub command: Command,
+}
+
+/// Runtime funding topology selected by `cooker fund`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum FundingCommandScheme {
+    /// One local funder sends one transfer to every account.
+    #[default]
+    DedicatedPerOperator,
+    /// Shared disbursers execute one globally mixed, fixed-denomination schedule.
+    PooledMixedRounds,
 }
 
 /// Supported offline and Surfpool-only commands.
@@ -64,7 +74,7 @@ pub enum Command {
         #[arg(long)]
         start: Option<String>,
     },
-    /// Preview or execute durable local funding for the generated fleet.
+    /// Preview or execute durable local funding for one or more generated fleets.
     Fund {
         /// Configuration path.
         #[arg(short, long, default_value = "cooker.toml")]
@@ -75,12 +85,30 @@ pub enum Command {
         /// Isolated durable funding database.
         #[arg(long, default_value = ".surfpool/state/funding.sqlite")]
         database: PathBuf,
-        /// Funder key under the ignored `.surfpool/keys` directory.
+        /// Direct-scheme funder key under the ignored `.surfpool/keys` directory.
         #[arg(long, default_value = ".surfpool/keys/funder.json")]
         funder: PathBuf,
-        /// Exact native amount sent once to each fleet signer.
+        /// Funding topology. Direct funding remains the default.
+        #[arg(long, value_enum, default_value_t)]
+        scheme: FundingCommandScheme,
+        /// Public fleet roots combined into one recipient roster. The project root is the default.
+        #[arg(long = "recipient-project-root")]
+        recipient_project_roots: Vec<PathBuf>,
+        /// Pooled-scheme disburser keys, in stable payer-index order.
+        #[arg(long = "disburser")]
+        disbursers: Vec<PathBuf>,
+        /// Native transfer denomination. Direct sends it once; pooled sends each scheduled top-up.
         #[arg(long)]
         lamports_per_agent: Option<u64>,
+        /// Number of pooled batching rounds.
+        #[arg(long, default_value_t = 30)]
+        funding_rounds: u32,
+        /// Fixed-denomination top-ups per pooled recipient, including round zero.
+        #[arg(long, default_value_t = 4)]
+        top_ups_per_account: usize,
+        /// Wall-clock seconds between pooled round start times.
+        #[arg(long, default_value_t = 86_400)]
+        round_interval_seconds: u64,
         /// Maximum funding actions reconciled or executed in this bounded pass.
         #[arg(short, long, default_value_t = 1_000)]
         limit: usize,

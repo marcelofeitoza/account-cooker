@@ -52,10 +52,17 @@ the mixing rather than the pool as the cause. The measurement covers the disburs
 only; deposits into the pool, custody of the pool, and value or count matching across the
 pool boundary are unmeasured, so this does not establish transaction-graph anonymity.
 
-That result is an evaluator measurement, not a shipped capability. The runtime `cooker fund`
-command is unchanged and still pays each account from the operator wallet. No pool, mixer,
-or custodial service is implemented. See
-[the funding-provenance measurement](evidence/funding/README.md).
+The disbursement policy is now wired into `cooker fund`. Direct funding remains the default.
+The selectable `pooled-mixed-rounds` mode combines at least two public fleet manifests into
+one label-blind roster, loads an ordered set of already-funded local disburser keys, and turns
+the core schedule into fixed-denomination native transfers with durable round times,
+per-disburser budgets, bounded claims, and the existing simulation, submission, confirmation,
+and recovery lifecycle.
+
+This runtime path implements the measured disbursement topology, not a custodial or on-chain
+pool. Deposits into the disburser wallets remain external and observable, and the committed
+evaluator result was not rerun against runtime chain traffic. See
+[the funding-provenance measurement and runtime boundary](evidence/funding/README.md).
 
 The project does not implement self-trading, artificial volume, governance voting, referral
 or airdrop farming, NFT manipulation, dust spam, bridge churn, or deceptive multi-hop
@@ -136,7 +143,7 @@ states what the public run establishes and what remains unmeasured.
 ```text
 cooker keygen       Generate a permission-checked local Surfpool signer
 cooker fleet-init   Create a durable multi-signer fleet
-cooker fund         Preview or execute idempotent local fleet funding
+cooker fund         Preview or execute direct or pooled local fleet funding
 cooker init         Write the documented configuration
 cooker validate     Validate configuration without network access
 cooker plan         Preview deterministic observable actions
@@ -152,6 +159,38 @@ cooker recover      Audit and reconcile without blind resubmission
 `fund`, `run`, and `recover` are previews unless both `--execute` and
 `--acknowledge-policy` are supplied. `doctor`, previews, and `status` report that no signer
 was loaded and whether state changed, making the safety boundary machine-verifiable.
+
+Pooled funding is an explicit coordinator workflow. Pass `--scheme pooled-mixed-rounds`,
+repeat `--recipient-project-root` for at least two distinct fleet manifests, and repeat
+`--disburser` for at least two pre-funded local keys. The coordinator builds one global
+schedule, not one schedule per fleet. `--funding-rounds`, `--top-ups-per-account`, and
+`--round-interval-seconds` define its fixed top-ups and due times. Pool deposits are not
+created by this command. Preview output lists each payer index's principal, fee ceiling,
+reserve, and required starting balance. Runtime schedules are capped at 100,000 transfers.
+
+```bash
+cooker keygen --output .surfpool/keys/disburser-00.json
+cooker keygen --output .surfpool/keys/disburser-01.json
+cooker fund --scheme pooled-mixed-rounds \
+  --recipient-project-root fleets/operator-00 \
+  --recipient-project-root fleets/operator-01 \
+  --disburser .surfpool/keys/disburser-00.json \
+  --disburser .surfpool/keys/disburser-01.json \
+  --funding-rounds 30 --top-ups-per-account 4 --round-interval-seconds 86400
+```
+
+The two recipient roots must already contain public fleet manifests with distinct run
+identities on the configured Surfnet. Fund the disburser addresses before adding
+`--execute --acknowledge-policy`. The funding database binds the roster, schedule, seed, and
+ordered disburser addresses, so bounded reruns must repeat the same inputs. Use a new
+`--database` path for a different pooled schedule.
+
+Round zero is anchored to the latest fleet creation timestamp, not the command invocation.
+If execution starts late, overdue rounds retain deterministic order but can be submitted in
+successive bounded passes without their original wall-clock spacing. Use freshly created
+fleet manifests when that spacing matters. Run only one funding coordinator against a
+funding database at a time; cross-process submission order is outside the database lease
+contract.
 
 ## Architecture
 

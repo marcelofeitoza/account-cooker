@@ -103,6 +103,8 @@ Owns orchestration:
 - Controller startup and shutdown.
 - Priority queue and due-action dispatch.
 - Bounded worker pool and per-wallet exclusivity.
+- Funding schedule materialization from core payer assignments into ordered, due native
+  transfers with exact per-disburser budgets.
 - Retry classification and backoff.
 - Unknown-outcome reconciliation.
 - Graceful shutdown and durable lifecycle checkpoints used by the subprocess recovery
@@ -390,8 +392,9 @@ The evaluator creates:
 - baseline comparisons;
 - ablations and seed summaries.
 
-No evaluator result changes runtime behavior. This prevents feedback from silently
-optimizing for the exact test set.
+No evaluator result changes runtime behavior. The evaluator and runtime independently
+consume the same core funding policy, while runtime selection and parameters remain explicit
+operator inputs. This prevents feedback from silently optimizing for the exact test set.
 
 ## 13. CLI Contract
 
@@ -413,6 +416,13 @@ Implemented commands:
 
 `fund`, `run`, and `recover` remain previews unless explicit execution and policy
 acknowledgement are present. Non-Surfpool networks are rejected even with acknowledgement.
+
+`fund` defaults to one direct payer. Its pooled mode accepts multiple public fleet roots as
+one recipient roster, maps core payer indexes to distinct local disburser signers, and
+persists fixed-denomination top-ups with configured round due times. It requires the
+disbursers to be funded before execution and does not manage pool deposits. Funding claims
+are acquired and settled one at a time so signer serialization, core ordering, and lease
+validity agree within the single coordinator process.
 
 Every command supports JSON output. Secret configuration values are never emitted.
 

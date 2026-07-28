@@ -143,6 +143,12 @@ fn keygen_and_fleet_init_create_private_durable_unique_signers() -> Result<()> {
         &root.to_string_lossy(),
     ])?)?;
     assert_eq!(funding["mode"], "preview");
+    assert_eq!(funding["funding_scheme"], "dedicated_per_operator");
+    assert_eq!(funding["operator_fleets"], 1);
+    assert_eq!(funding["disbursers"], 1);
+    assert_eq!(funding["rounds"], 1);
+    assert_eq!(funding["top_ups_per_account"], 1);
+    assert_eq!(funding["scheduled_transfers"], 3);
     assert_eq!(funding["network_preflight"], false);
     assert_eq!(funding["signer_loaded"], false);
     assert_eq!(funding["state_changed"], false);
@@ -164,6 +170,140 @@ fn keygen_and_fleet_init_create_private_durable_unique_signers() -> Result<()> {
         "3",
     ])?;
     assert!(execute(repeat, &mut Vec::new()).is_err());
+    Ok(())
+}
+
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one fixture covers multi-fleet preview, requirements, and schedule bounds"
+)]
+fn pooled_funding_preview_combines_operator_fleets_without_side_effects() -> Result<()> {
+    let directory = tempdir()?;
+    let root = directory.path();
+    let config = root.join("cooker.toml");
+    initialize(&config)?;
+    let mut recipient_roots = Vec::new();
+    for (name, seed_byte) in [("operator-a", "3b"), ("operator-b", "4c")] {
+        let recipient_root = root.join(name);
+        fs::create_dir_all(&recipient_root)?;
+        let recipient_config = recipient_root.join("cooker.toml");
+        initialize(&recipient_config)?;
+        let original = fs::read_to_string(&recipient_config)?;
+        fs::write(
+            &recipient_config,
+            original.replace(&"2a".repeat(32), &seed_byte.repeat(32)),
+        )?;
+        invoke(&[
+            "cooker",
+            "fleet-init",
+            "--config",
+            &recipient_config.to_string_lossy(),
+            "--project-root",
+            &recipient_root.to_string_lossy(),
+            "--agents",
+            "3",
+        ])?;
+        recipient_roots.push(recipient_root);
+    }
+
+    let report: Value = serde_json::from_str(&invoke(&[
+        "cooker",
+        "fund",
+        "--config",
+        &config.to_string_lossy(),
+        "--project-root",
+        &root.to_string_lossy(),
+        "--scheme",
+        "pooled-mixed-rounds",
+        "--recipient-project-root",
+        &recipient_roots[0].to_string_lossy(),
+        "--recipient-project-root",
+        &recipient_roots[1].to_string_lossy(),
+        "--disburser",
+        ".surfpool/keys/disburser-a.json",
+        "--disburser",
+        ".surfpool/keys/disburser-b.json",
+        "--lamports-per-agent",
+        "1000",
+        "--funding-rounds",
+        "3",
+        "--top-ups-per-account",
+        "2",
+        "--round-interval-seconds",
+        "60",
+    ])?)?;
+
+    assert_eq!(report["mode"], "preview");
+    assert_eq!(report["funding_scheme"], "pooled_mixed_rounds");
+    assert_eq!(report["operator_fleets"], 2);
+    assert_eq!(report["fleet_agents"], 6);
+    assert_eq!(report["disbursers"], 2);
+    assert_eq!(report["rounds"], 3);
+    assert_eq!(report["top_ups_per_account"], 2);
+    assert_eq!(report["denomination_lamports"], 1_000);
+    assert_eq!(report["scheduled_transfers"], 12);
+    assert_eq!(report["scheduled_principal_lamports"], 12_000);
+    let requirements = report["disburser_requirements"]
+        .as_array()
+        .context("missing disburser requirements")?;
+    assert_eq!(requirements.len(), 2);
+    assert_eq!(
+        requirements
+            .iter()
+            .map(|requirement| requirement["scheduled_transfers"].as_u64().unwrap_or(0))
+            .sum::<u64>(),
+        12
+    );
+    assert_eq!(
+        requirements
+            .iter()
+            .map(|requirement| requirement["principal_lamports"].as_u64().unwrap_or(0))
+            .sum::<u64>(),
+        12_000
+    );
+    for (payer_index, requirement) in requirements.iter().enumerate() {
+        assert_eq!(requirement["payer_index"], u64::try_from(payer_index)?);
+        assert_eq!(
+            requirement["required_balance_lamports"],
+            requirement["principal_lamports"].as_u64().unwrap_or(0)
+                + requirement["fee_ceiling_lamports"].as_u64().unwrap_or(0)
+                + requirement["reserve_lamports"].as_u64().unwrap_or(0)
+        );
+    }
+    assert_eq!(report["pool_deposits"], "external");
+    assert_eq!(report["network_preflight"], false);
+    assert_eq!(report["signer_loaded"], false);
+    assert_eq!(report["state_changed"], false);
+    assert!(!root.join(".surfpool/state/funding.sqlite").exists());
+
+    let oversized = invoke(&[
+        "cooker",
+        "fund",
+        "--config",
+        &config.to_string_lossy(),
+        "--project-root",
+        &root.to_string_lossy(),
+        "--scheme",
+        "pooled-mixed-rounds",
+        "--recipient-project-root",
+        &recipient_roots[0].to_string_lossy(),
+        "--recipient-project-root",
+        &recipient_roots[1].to_string_lossy(),
+        "--disburser",
+        ".surfpool/keys/disburser-a.json",
+        "--disburser",
+        ".surfpool/keys/disburser-b.json",
+        "--funding-rounds",
+        "100000",
+        "--top-ups-per-account",
+        "100000",
+    ]);
+    let error = match oversized {
+        Ok(_) => anyhow::bail!("oversized pooled schedule was accepted"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("100000-transfer safety ceiling"));
     Ok(())
 }
 

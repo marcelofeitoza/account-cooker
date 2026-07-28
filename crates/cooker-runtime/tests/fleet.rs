@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     str,
     sync::{
@@ -17,11 +17,13 @@ use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, TimeZone, Utc};
 use cooker_core::{
     ActionAdapter, ActionId, ActionKind, ActionPayload, ActionState, AdapterContext, AgentId,
-    ChainGateway, ChainReceipt, Clock, ConfirmationStatus, CookerError, PlannedAction, Policy,
-    PolicyDecision, PreparedAction, RunId, SimulationReceipt, StateExpectation, StateStore,
-    VirtualClock,
+    BudgetConfig, ChainGateway, ChainReceipt, Clock, ConfirmationStatus, CookerError, FundingPlan,
+    PlannedAction, Policy, PolicyConfig, PolicyDecision, PooledFundingConfig, PreparedAction,
+    RunId, SafetyPolicy, SimulationReceipt, StateExpectation, StateStore, VirtualClock,
 };
-use cooker_runtime::{FleetRuntime, NoFaults, RuntimeEngine, RuntimeSettings};
+use cooker_runtime::{
+    FleetRuntime, FundingExecutionPlan, FundingRecipient, NoFaults, RuntimeEngine, RuntimeSettings,
+};
 use cooker_store::{Store, StoreIdentity};
 use tempfile::TempDir;
 use tokio::sync::watch;
@@ -238,6 +240,188 @@ async fn durable_agents_route_to_distinct_signer_engines_and_signatures() -> Tes
             .and_then(Option::as_deref),
         Some(SIGNER_B)
     );
+    Ok(())
+}
+
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one test follows the full schedule, store, router, and gateway lifecycle"
+)]
+async fn pooled_funding_routes_fixed_topups_through_gateway() -> TestResult {
+    let directory = TempDir::new()?;
+    let now = fixed_time()?;
+    let epoch = now - TimeDelta::minutes(3);
+    let clock = Arc::new(VirtualClock::new(now));
+    let store = open_store(&directory, "pooled-funding-routing")?;
+    let probe = Arc::new(Probe::default());
+    let run_id = RunId(Uuid::from_u128(15));
+    let disburser_a = AgentId(Uuid::from_u128(16));
+    let disburser_b = AgentId(Uuid::from_u128(17));
+    let accounts: Vec<_> = (100_u128..106)
+        .map(|value| AgentId(Uuid::from_u128(value)))
+        .collect();
+    let recipients: Vec<_> = accounts
+        .iter()
+        .enumerate()
+        .map(|(index, account)| FundingRecipient {
+            account: *account,
+            destination: format!("pooled-destination-{index}"),
+        })
+        .collect();
+    let schedule = FundingPlan::pooled_mixed_rounds(
+        &accounts,
+        PooledFundingConfig {
+            disbursers: 2,
+            rounds: 3,
+            top_ups_per_account: 2,
+            denomination_lamports: 50_000,
+        },
+        &[9; 32],
+    )?;
+    assert!(
+        FundingExecutionPlan::new(
+            &schedule,
+            &recipients,
+            &[disburser_a],
+            run_id,
+            "pooled-runtime-test-v1",
+            epoch,
+            Duration::from_secs(60),
+            5_000,
+        )
+        .is_err()
+    );
+    let execution = FundingExecutionPlan::new(
+        &schedule,
+        &recipients,
+        &[disburser_a, disburser_b],
+        run_id,
+        "pooled-runtime-test-v1",
+        epoch,
+        Duration::from_secs(60),
+        5_000,
+    )?;
+    assert_eq!(execution.actions().len(), 12);
+    assert!(
+        execution
+            .actions()
+            .windows(2)
+            .all(|pair| pair[0].scheduled_at < pair[1].scheduled_at)
+    );
+    let destination_by_account: BTreeMap<_, _> = recipients
+        .iter()
+        .map(|recipient| (recipient.account, recipient.destination.as_str()))
+        .collect();
+    for (top_up, planned) in schedule.ordered_top_ups().iter().zip(execution.actions()) {
+        let expected_agent = [disburser_a, disburser_b][top_up.funder];
+        assert_eq!(planned.agent_id, expected_agent);
+        assert_eq!(
+            planned.payload,
+            ActionPayload::NativeTransfer {
+                destination: destination_by_account[&top_up.account].to_owned(),
+                lamports: 50_000,
+            }
+        );
+        assert!(store.enqueue_action(planned)?);
+    }
+    let first_round = schedule
+        .ordered_top_ups()
+        .iter()
+        .filter(|top_up| top_up.round == 0)
+        .count();
+    let initial_claim_at = epoch + TimeDelta::seconds(1);
+    let initial = store.claim_due_actions(
+        "pooled-funding-round-zero",
+        initial_claim_at,
+        initial_claim_at + TimeDelta::minutes(1),
+        execution.actions().len(),
+    )?;
+    assert_eq!(initial.len(), first_round);
+    for lease in &initial {
+        store.release_lease(lease, initial_claim_at)?;
+    }
+    let leases = store.claim_due_actions(
+        "pooled-funding",
+        now,
+        now + TimeDelta::minutes(1),
+        execution.actions().len(),
+    )?;
+    assert_eq!(leases.len(), execution.actions().len());
+    let allowed_destinations: BTreeSet<_> = recipients
+        .iter()
+        .map(|recipient| recipient.destination.clone())
+        .collect();
+    let mut engines = BTreeMap::new();
+    for (agent_id, signer) in [(disburser_a, SIGNER_A), (disburser_b, SIGNER_B)] {
+        let budget = execution
+            .disburser_budgets()
+            .get(&agent_id)
+            .ok_or("missing test disburser budget")?;
+        let transfers = u64::try_from(budget.transfers)?;
+        assert_eq!(budget.principal_lamports, transfers * 50_000);
+        assert_eq!(budget.fee_ceiling_lamports, transfers * 5_000);
+        let total = budget.total_lamports()?;
+        let policy: Arc<dyn Policy> = Arc::new(SafetyPolicy::new(PolicyConfig {
+            budgets: BudgetConfig {
+                daily_lamports: total,
+                lifetime_lamports: total,
+                reserve_lamports: 1_000,
+                max_fee_lamports: 5_000,
+                max_account_creation_lamports: 0,
+            },
+            allowed_actions: BTreeSet::from([ActionKind::NativeTransfer]),
+            max_action_amounts: BTreeMap::from([(ActionKind::NativeTransfer, 50_000)]),
+            allowed_destinations: allowed_destinations.clone(),
+            allowed_mints: BTreeSet::new(),
+            native_input_mints: BTreeSet::new(),
+            max_slippage_bps: 0,
+        })?);
+        engines.insert(
+            agent_id,
+            engine_with_policy(
+                Arc::clone(&store),
+                Arc::clone(&probe),
+                Arc::clone(&clock),
+                signer,
+                Duration::ZERO,
+                policy,
+            )?,
+        );
+    }
+    let store_dyn: Arc<dyn StateStore> = store.clone();
+    let clock_dyn: Arc<dyn Clock> = clock.clone();
+    let fleet = Arc::new(FleetRuntime::new(store_dyn, engines, 1, clock_dyn)?);
+    let (_stop_tx, stop_rx) = watch::channel(false);
+
+    let summary = fleet.run_claimed(leases, stop_rx).await;
+
+    assert_eq!(summary.confirmed, execution.actions().len());
+    assert!(summary.errors.is_empty());
+    assert_eq!(summary.peak_workers, 1);
+    for agent_id in [disburser_a, disburser_b] {
+        let usage = store.budget_usage(agent_id, now)?;
+        let budget = execution
+            .disburser_budgets()
+            .get(&agent_id)
+            .ok_or("missing test disburser budget")?;
+        assert_eq!(usage.spent_today_lamports, budget.total_lamports()?);
+        assert_eq!(usage.spent_lifetime_lamports, budget.total_lamports()?);
+    }
+    let submitted = probe.submissions()?;
+    let expected: Vec<_> = execution
+        .actions()
+        .iter()
+        .map(|planned| {
+            let signer = if planned.agent_id == disburser_a {
+                SIGNER_A
+            } else {
+                SIGNER_B
+            };
+            signature(planned, signer)
+        })
+        .collect();
+    assert_eq!(submitted, expected);
     Ok(())
 }
 
@@ -489,6 +673,24 @@ fn engine(
     signer: &str,
     prepare_delay: Duration,
 ) -> Result<Arc<RuntimeEngine>, CookerError> {
+    engine_with_policy(
+        store,
+        probe,
+        clock,
+        signer,
+        prepare_delay,
+        Arc::new(AllowAll),
+    )
+}
+
+fn engine_with_policy(
+    store: Arc<Store>,
+    probe: Arc<Probe>,
+    clock: Arc<VirtualClock>,
+    signer: &str,
+    prepare_delay: Duration,
+    policy: Arc<dyn Policy>,
+) -> Result<Arc<RuntimeEngine>, CookerError> {
     let gateway: Arc<dyn ChainGateway> = Arc::new(ProbeGateway {
         probe: Arc::clone(&probe),
         clock: Arc::clone(&clock),
@@ -501,7 +703,7 @@ fn engine(
     RuntimeEngine::new(
         store,
         gateway,
-        Arc::new(AllowAll),
+        policy,
         [(ActionKind::NativeTransfer, adapter)],
         RuntimeSettings {
             adapter_context: AdapterContext {

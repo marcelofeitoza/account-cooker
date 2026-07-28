@@ -113,10 +113,10 @@ These are possible follow-on projects, not completion gates and not implied capa
 - Mainnet execution of any kind.
 - Unattended or continuous devnet bot operation. The one devnet run is a bounded,
   hand-started measurement, not a deployed workload.
-- Hiding or laundering a common funding source. The evaluator measures what different
-  payer-assignment schemes do to the funding attack, and `cooker-core::funding` builds
-  those schedules, but no pooling is wired into the runtime `cooker fund` path and no
-  custodial or on-chain mixing service is implemented.
+- Pool custody or deposit-side provenance mitigation. The runtime can execute the measured
+  disbursement schedule across multiple public fleet manifests and already-funded local
+  disbursers, but it does not source pool deposits or implement a custodial or on-chain
+  mixing service.
 - A ZK pool, mixer, relay, or external privacy-protocol integration.
 - Cross-host consensus or a distributed database.
 - DAO voting, airdrop farming, referral farming, NFT manipulation, or wash volume.

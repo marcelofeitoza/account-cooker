@@ -353,11 +353,14 @@ jq -e --argjson agents "${agents}" '
   .healthy == true and .signer_loaded == false and .state_changed == false
 ' "${output_dir}/cli/doctor.json" >/dev/null || die "doctor evidence gate failed"
 jq -e --argjson agents "${agents}" '
-  .mode == "preview" and .fleet_agents == $agents and
+  .mode == "preview" and .funding_scheme == "dedicated_per_operator" and
+  .fleet_agents == $agents and .scheduled_transfers == $agents and
   .network_preflight == false and .signer_loaded == false and .state_changed == false
 ' "${output_dir}/cli/fund-preview.json" >/dev/null || die "funding preview evidence gate failed"
 jq -e --argjson agents "${agents}" '
-  .mode == "execute" and .actions_inserted == $agents and .claimed_actions == $agents and
+  .mode == "execute" and .funding_scheme == "dedicated_per_operator" and
+  .scheduled_transfers == $agents and .actions_inserted == $agents and
+  .claimed_actions == $agents and
   .workers.confirmed == $agents and (.workers.errors | length) == 0 and
   .snapshot.unresolved_actions == 0 and .network_preflight == true and
   .signer_loaded == true and .state_changed == true

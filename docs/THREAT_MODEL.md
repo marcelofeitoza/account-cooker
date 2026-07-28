@@ -158,10 +158,22 @@ fleet-level fact that every account appears in the first round, and value or cou
 across the pool boundary are all outside the observation model. A batch with one recipient
 gives that transfer no cover, and the smallest-batch column reports it.
 
-The scope is the evaluator. `cooker-core::funding` builds the schedules and `cooker-eval`
-measures them. The runtime `cooker fund` path is unchanged and still pays each account from
-the operator wallet. No pool, mixer, or custodial service is implemented, and any real
-funding backend requires its own threat model and approval.
+The measured disbursement policy is also available in the runtime. Direct funding stays the
+default. In `pooled-mixed-rounds` mode, `cooker fund` requires at least two distinct public
+fleet manifests and two distinct, already-funded local disburser keys. It builds one global
+`cooker-core::funding` schedule, maps payer indexes to signer-isolated runtime engines, and
+submits the fixed-denomination top-ups through the same policy, store, gateway, adapter, fee,
+limit, confirmation, and recovery boundaries as other native transfers. Round zero starts at
+the latest fleet creation time; later rounds receive configured due times, and overdue work
+is still drained only through bounded command passes. Overdue rounds can therefore lose
+their original wall-clock spacing, though their durable submission order is retained within
+one coordinator. Concurrent coordinators against one funding database are unsupported.
+
+That runtime integration does not extend the evaluator claim. The committed scores are
+synthetic and were not re-measured from these chain submissions. Disburser deposits remain
+external, their funding edges remain observable, and local keys provide neither external
+custody nor an on-chain mixing service. The first-round fleet reveal, pool-boundary value and
+count matching, RPC metadata, and deposit-side provenance remain outside the mitigation.
 
 ## 8. Transaction Transparency Bound
 

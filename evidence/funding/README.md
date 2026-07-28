@@ -10,12 +10,22 @@ single funding edge re-linked the fleet for free.
 
 ## Scope Of The Claim
 
-This is an evaluator result. `cooker-core::funding` builds the schedules and
-`cooker-eval` measures them; the runtime `cooker fund` command is unchanged and still pays
-each account from the operator wallet. Nothing here is a deployed pool, a custodial
-service, or an on-chain construction. The result says what a payer assignment does to a
-named attack under a named observation model. It does not say that such a pool exists, that
-it would be safe to operate, or that operating one is legal in any jurisdiction.
+This remains an evaluator result. `cooker-core::funding` builds the schedules and
+`cooker-eval` measures them. The committed numbers below were not produced from runtime
+chain traffic.
+
+The disbursement policy is now executable through `cooker fund`. Its opt-in
+`pooled-mixed-rounds` mode combines at least two public fleet manifests into one global
+roster, maps the core payer indexes to distinct pre-funded local disburser signers, schedules
+fixed-denomination top-ups at configured round intervals, and uses the durable native
+transfer gateway and recovery path. Overdue rounds keep their durable order but can execute
+without the original wall-clock spacing. Direct single-funder execution remains the default.
+
+That implementation is not a deployed pool, a custodial service, or an on-chain
+construction. It does not create or conceal deposits into the disburser wallets. The result
+below says what the disbursement payer assignment does to a named synthetic attack under a
+named observation model. It does not measure deposit-side provenance, live RPC metadata, or
+runtime chain observations.
 
 ## What Was Run
 
