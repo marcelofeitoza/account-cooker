@@ -1,6 +1,8 @@
 # Public Devnet Run And Topology Delta
 
-Status: one 621.9-second bounded native-transfer run against public Solana devnet is
+Status: two runs against public Solana devnet are committed. A 3.32-hour sustained run
+(200 rounds, 816 confirmed actions, section 1a) and an earlier 621.9-second bounded run
+are
 committed, with full transaction signatures that resolved on a public explorer immediately
 after the run. The loopback Surfpool results are unchanged and stay the canonical acceptance
 evidence. This document exists because a loopback result cannot, by itself, establish
@@ -39,6 +41,55 @@ does not control public-cluster processes, so that provenance is absent here.
 own; it composes existing Solana programs. Every transaction in this run is a System Program
 transfer, so the program id in the evidence is the System Program,
 `11111111111111111111111111111111`.
+
+## 1a. The Sustained Run
+
+The 621.9-second run answered "does this work on a public cluster". It could not answer
+"does it still behave the same way after hours of real cluster time", because ten minutes
+is not long enough for drift, growth or degradation to appear.
+
+This run is the second measurement. One payer, 200 rounds at one round per minute,
+**3.32 hours** of wall clock (11,961 s), 816 confirmed actions.
+
+| property | value |
+|---|---|
+| rounds | 200 |
+| wall clock | 11,961 s (3.32 h) |
+| confirmed actions | 816 |
+| unconfirmed | 0 |
+| expired | 0 |
+| distinct block leaders observed | 13 |
+| epoch | 1110 throughout |
+| local database growth | 7,962,488 -> 16,473,808 bytes (+8.5 MB) |
+| round execution time | min 13,576 ms, max 51,042 ms |
+| first 10 rounds vs last 10 | 18,237 ms avg -> 14,399 ms avg |
+
+**What the duration actually revealed**, none of which the short run could show:
+
+- **No degradation.** The last ten rounds ran *faster* than the first ten (14,399 ms vs
+  18,237 ms). Whatever the early cost was, it was warm-up, not accumulation.
+- **Storage growth is real and linear.** The local store grew 8.5 MB over 200 rounds,
+  about 43 KB per round. That is a capacity-planning fact a ten-minute run cannot surface,
+  and it is the strongest argument for measuring duration at all.
+- **Cluster variance is wide but not fatal.** The slowest round took 51 s against a 13.6 s
+  floor, roughly 3.8x, with zero unconfirmed and zero expired across the whole run.
+- **13 distinct leaders**, so the result is not an artifact of one friendly validator.
+
+### Honest bounds on this run specifically
+
+- **It was stopped deliberately at 3.32 h against a 6 h target.** The measurement had
+  stabilised and the remaining time was not worth its cost. It is reported as a 3.32-hour
+  run, not as the 6-hour run that was planned.
+- **Still one payer, one process, one endpoint, one region.** Duration was the variable
+  under test; concurrency and topology were not.
+- **It stayed inside a single epoch** (1110), so it says nothing about epoch-boundary
+  behaviour, which was one of the things a 24-hour run would have covered.
+- The devnet faucet refused this address throughout, so the run was budgeted against a
+  fixed non-replenishable balance rather than topped up.
+
+Evidence: `evidence/devnet-sustained/` holds the per-round JSONL, the full soak record
+with all 816 signatures, a summary, and checksums. Every signature resolves on the public
+explorer.
 
 ## 2. Reproduce It
 

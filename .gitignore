@@ -15,3 +15,6 @@
 # temporary captures remain local.
 /evidence/raw/
 /evidence/tmp/
+
+# Raw run working dirs (databases, WAL); promoted evidence lives in evidence/<name>/
+evidence/raw/
