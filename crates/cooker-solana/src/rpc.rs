@@ -73,6 +73,9 @@ const GET_BLOCK_HEIGHT: &str = "getBlockHeight";
 const GET_EPOCH_INFO: &str = "getEpochInfo";
 const GET_STAKE_MINIMUM_DELEGATION: &str = "getStakeMinimumDelegation";
 const GET_VOTE_ACCOUNTS: &str = "getVoteAccounts";
+const GET_SLOT_LEADERS: &str = "getSlotLeaders";
+/// Largest slot window `getSlotLeaders` accepts in one request.
+const MAX_SLOT_LEADER_WINDOW: u64 = 5_000;
 const GET_BALANCE: &str = "getBalance";
 const GET_ACCOUNT_INFO: &str = "getAccountInfo";
 const GET_MINIMUM_RENT: &str = "getMinimumBalanceForRentExemption";
@@ -654,6 +657,27 @@ impl JsonRpcClient {
             .collect()
     }
 
+    async fn slot_leaders(&self, start_slot: u64, limit: u64) -> Result<Vec<Pubkey>, RpcError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let window = limit.min(MAX_SLOT_LEADER_WINDOW);
+        let leaders: Vec<String> = self
+            .request(GET_SLOT_LEADERS, json!([start_slot, window]))
+            .await?;
+        leaders
+            .into_iter()
+            .map(|leader| {
+                Pubkey::from_str(&leader).map_err(|error| {
+                    RpcError::invalid_response(
+                        GET_SLOT_LEADERS,
+                        format!("invalid slot leader pubkey: {error}"),
+                    )
+                })
+            })
+            .collect()
+    }
+
     async fn time_travel_to_epoch(&self, epoch: u64) -> Result<EpochInfo, RpcError> {
         let value: EpochInfoValue = self
             .request(TIME_TRAVEL, json!([{"absoluteEpoch": epoch}]))
@@ -979,6 +1003,19 @@ impl SolanaGateway {
     /// Returns [`RpcError`] for transport, JSON-RPC, or invalid vote-account data.
     pub async fn active_vote_accounts(&self) -> Result<Vec<VoteAccount>, RpcError> {
         self.rpc.active_vote_accounts().await
+    }
+
+    /// Return the block leader assigned to each slot in `[start_slot, start_slot + limit)`.
+    ///
+    /// The endpoint answers from the leader schedule, so a window must fall inside a schedule
+    /// the endpoint still holds. Windows longer than the endpoint's ceiling are truncated to it,
+    /// and the returned length is the authority on how many slots were actually answered.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError`] for transport, JSON-RPC, or invalid leader-address response data.
+    pub async fn slot_leaders(&self, start_slot: u64, limit: u64) -> Result<Vec<Pubkey>, RpcError> {
+        self.rpc.slot_leaders(start_slot, limit).await
     }
 
     /// Advance the verified local Surfpool clock to an absolute future epoch.

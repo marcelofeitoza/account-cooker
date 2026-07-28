@@ -37,8 +37,8 @@ use url::Url;
 mod common;
 
 use common::{
-    LoseOneSendResponse, NativeSoakParams, env_usize, native_transfer_runtime,
-    planned_native_actions, write_json,
+    LoseOneSendResponse, NativeSoakParams, classify_unconfirmed_cause, env_usize,
+    native_transfer_runtime, planned_native_actions, write_json,
 };
 
 const DEFAULT_TRANSACTION_COUNT: usize = 200;
@@ -669,33 +669,6 @@ async fn bounded_devnet_run_confirms_and_reconciles_without_duplicate_intents()
          rejected={rejected} wall_ms={wall_time_ms} confirmed_per_second={confirmed_per_second}"
     );
     Ok(())
-}
-
-/// Classify why an action never reached a confirmation, from its immutable event journal.
-///
-/// The distinction retained here is between explicit RPC-edge rejection and a persisted
-/// signature that remained absent through expiry. Absence does not prove where the send was
-/// lost, so the two outcomes are reported separately.
-fn classify_unconfirmed_cause(events: &[cooker_store::ActionEventRecord]) -> &'static str {
-    let mut cause = "unclassified";
-    for event in events {
-        let Some(detail) = event.detail.as_deref() else {
-            continue;
-        };
-        if detail.contains("injected devnet send-response loss") {
-            cause = "injected_response_loss";
-        } else if detail.contains("sendTransaction") && detail.contains("429") {
-            cause = "rpc_edge_rate_limited_send";
-        } else if detail.contains("429") {
-            cause = "rpc_edge_rate_limited_read";
-        } else if detail.contains("blockhash validity window elapsed") {
-            // Keep an earlier, more specific cause: expiry is the outcome, not the reason.
-            if cause == "unclassified" {
-                cause = "not_included_before_blockhash_expiry";
-            }
-        }
-    }
-    cause
 }
 
 fn run_scoped_destination(run_id: RunId, sequence: u64) -> Pubkey {
