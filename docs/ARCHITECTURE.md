@@ -61,7 +61,7 @@ Owns stable domain contracts:
 - AgentSnapshot, BudgetUsage, and StateExpectation.
 - PlannedAction, PreparedAction, SimulationReceipt, and ChainReceipt.
 - ActionKind, ActionPayload, ActionState, ConfirmationStatus, and PolicyDecision.
-- BehaviorModel, ActionAdapter, Policy, StateStore, ChainGateway, and Clock contracts.
+- ActionAdapter, Policy, StateStore, ChainGateway, and Clock contracts.
 - Deterministic seed derivation and virtual scheduling.
 
 It depends only on general-purpose crates. It does not know SQLite, JSON-RPC,

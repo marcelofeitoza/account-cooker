@@ -30,7 +30,7 @@ pub mod trace;
 pub use behavior::{ActionCatalog, BehaviorDecision, PersonaBehaviorModel, SplRoute, SwapRoute};
 pub use clock::{Clock, SystemClock, VirtualClock};
 pub use config::{BudgetConfig, CookerConfig, NetworkConfig, RuntimeConfig};
-pub use contracts::{ActionAdapter, BehaviorModel, ChainGateway, Policy, StateStore};
+pub use contracts::{ActionAdapter, ChainGateway, Policy, StateStore};
 pub use domain::*;
 pub use error::{CookerError, ErrorClass};
 pub use funding::{FundingPlan, FundingScheme, FundingTopUp, OperatorAccount, PooledFundingConfig};

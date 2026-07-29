@@ -5,7 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use cooker_core::AgentId;
 use serde::{Deserialize, Serialize};
 
-use crate::features::{AgentFeatures, FeatureSet};
+use crate::{
+    features::{AgentFeatures, FeatureSet},
+    metrics::count_as_f64,
+};
 
 /// Independently reported observable feature family.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -375,10 +378,6 @@ fn balance_rank_score(left: Option<f64>, right: Option<f64>) -> f64 {
         }
         _ => 0.0,
     }
-}
-
-fn count_as_f64(value: usize) -> f64 {
-    u32::try_from(value).map_or(f64::from(u32::MAX), f64::from)
 }
 
 #[cfg(test)]

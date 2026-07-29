@@ -6,7 +6,6 @@ use rand_chacha::ChaCha12Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    contracts::BehaviorModel,
     domain::{
         ActionId, ActionKind, ActionPayload, AgentSnapshot, PlannedAction, SessionState,
         StakeOperation,
@@ -486,18 +485,6 @@ impl PersonaBehaviorModel {
         let bytes = hasher.finalize();
         let prefix: [u8; 8] = bytes.as_bytes()[..8].try_into().unwrap_or([0; 8]);
         u64::from_le_bytes(prefix) % (limit + 1)
-    }
-}
-
-impl BehaviorModel for PersonaBehaviorModel {
-    fn plan_next(
-        &self,
-        agent: &AgentSnapshot,
-        now: DateTime<Utc>,
-        rng: &mut ChaCha12Rng,
-    ) -> Result<PlannedAction, CookerError> {
-        self.plan_decision(agent, now, rng)
-            .map(|decision| decision.action)
     }
 }
 

@@ -197,6 +197,54 @@ struct FundingReport {
     state_changed: bool,
 }
 
+impl FundingReport {
+    /// Fill every field derived from the workflow itself, leaving the outcome fields at rest.
+    ///
+    /// Preview and execute emit the same document, so both derive it here and then set only the
+    /// fields their own pass actually observed. That keeps the three emission points from
+    /// drifting apart field by field.
+    fn for_workflow(
+        file: &FileConfig,
+        database: &Path,
+        workflow: &FundingWorkflow,
+        limit: usize,
+        mode: &'static str,
+    ) -> Result<Self> {
+        let config = workflow.schedule.config();
+        Ok(Self {
+            schema_version: 2,
+            mode,
+            database: database.display().to_string(),
+            surfnet_id: file.core.network.surfnet_id.clone(),
+            funding_scheme: workflow.schedule.scheme(),
+            fleet_run_ids: workflow.roster.fleet_run_ids.clone(),
+            funding_run_id: workflow.funding_run_id,
+            operator_fleets: workflow.roster.fleet_run_ids.len(),
+            fleet_agents: workflow.roster.recipients.len(),
+            disbursers: workflow.disburser_agents.len(),
+            rounds: config.rounds,
+            top_ups_per_account: config.top_ups_per_account,
+            denomination_lamports: config.denomination_lamports,
+            round_interval_seconds: workflow.round_interval_seconds,
+            scheduled_transfers: workflow.execution.actions().len(),
+            scheduled_principal_lamports: funding_principal(&workflow.execution)?,
+            disburser_requirements: funding_disburser_requirements(file, workflow)?,
+            pool_deposits: pool_deposit_scope(workflow.schedule.scheme()),
+            action_limit: limit,
+            actions_inserted: 0,
+            claimed_actions: 0,
+            recovery_claimed: 0,
+            recovery: WorkerReport::default(),
+            workers: WorkerReport::default(),
+            snapshot: None,
+            network_preflight: false,
+            signer_loaded: false,
+            stop_reason: None,
+            state_changed: false,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 struct FundingDisburserRequirement {
     payer_index: usize,
@@ -741,38 +789,8 @@ fn preview_funding(
     } else {
         None
     };
-    let config = workflow.schedule.config();
-    let report = FundingReport {
-        schema_version: 2,
-        mode: "preview",
-        database: database.display().to_string(),
-        surfnet_id: file.core.network.surfnet_id.clone(),
-        funding_scheme: workflow.schedule.scheme(),
-        fleet_run_ids: workflow.roster.fleet_run_ids.clone(),
-        funding_run_id: workflow.funding_run_id,
-        operator_fleets: workflow.roster.fleet_run_ids.len(),
-        fleet_agents: workflow.roster.recipients.len(),
-        disbursers: workflow.disburser_agents.len(),
-        rounds: config.rounds,
-        top_ups_per_account: config.top_ups_per_account,
-        denomination_lamports: config.denomination_lamports,
-        round_interval_seconds: workflow.round_interval_seconds,
-        scheduled_transfers: workflow.execution.actions().len(),
-        scheduled_principal_lamports: funding_principal(&workflow.execution)?,
-        disburser_requirements: funding_disburser_requirements(file, workflow)?,
-        pool_deposits: pool_deposit_scope(workflow.schedule.scheme()),
-        action_limit: limit,
-        actions_inserted: 0,
-        claimed_actions: 0,
-        recovery_claimed: 0,
-        recovery: WorkerReport::default(),
-        workers: WorkerReport::default(),
-        snapshot,
-        network_preflight: false,
-        signer_loaded: false,
-        stop_reason: None,
-        state_changed: false,
-    };
+    let mut report = FundingReport::for_workflow(file, database, workflow, limit, "preview")?;
+    report.snapshot = snapshot;
     write_json(output, &report)
 }
 
@@ -828,38 +846,15 @@ fn execute_funding(
             let snapshot = store
                 .status_snapshot(clock.now(), None)
                 .map_err(anyhow::Error::msg)?;
-            let config = workflow.schedule.config();
-            let report = FundingReport {
-                schema_version: 2,
-                mode: "execute",
-                database: database.display().to_string(),
-                surfnet_id: file.core.network.surfnet_id.clone(),
-                funding_scheme: workflow.schedule.scheme(),
-                fleet_run_ids: workflow.roster.fleet_run_ids.clone(),
-                funding_run_id: workflow.funding_run_id,
-                operator_fleets: workflow.roster.fleet_run_ids.len(),
-                fleet_agents: workflow.roster.recipients.len(),
-                disbursers: workflow.disburser_agents.len(),
-                rounds: config.rounds,
-                top_ups_per_account: config.top_ups_per_account,
-                denomination_lamports: config.denomination_lamports,
-                round_interval_seconds: workflow.round_interval_seconds,
-                scheduled_transfers: workflow.execution.actions().len(),
-                scheduled_principal_lamports: funding_principal(&workflow.execution)?,
-                disburser_requirements: funding_disburser_requirements(file, workflow)?,
-                pool_deposits: pool_deposit_scope(workflow.schedule.scheme()),
-                action_limit: limit,
-                actions_inserted: 0,
-                claimed_actions: 0,
-                recovery_claimed,
-                recovery,
-                workers: WorkerReport::default(),
-                snapshot: Some(snapshot),
-                network_preflight: true,
-                signer_loaded: true,
-                stop_reason: stop_monitor.reason(),
-                state_changed: registration_changed || recovery_claimed != 0,
-            };
+            let mut report =
+                FundingReport::for_workflow(file, database, workflow, limit, "execute")?;
+            report.recovery_claimed = recovery_claimed;
+            report.recovery = recovery;
+            report.snapshot = Some(snapshot);
+            report.network_preflight = true;
+            report.signer_loaded = true;
+            report.stop_reason = stop_monitor.reason();
+            report.state_changed = registration_changed || recovery_claimed != 0;
             write_json(output, &report)?;
             bail!("funding reconciliation did not confirm every claimed action");
         }
@@ -898,41 +893,20 @@ fn execute_funding(
             .map_err(anyhow::Error::msg)?;
         let has_errors = !workers.all_claimed_confirmed(claimed_actions);
         let stop_reason = stop_monitor.reason();
-        let config = workflow.schedule.config();
-        let report = FundingReport {
-            schema_version: 2,
-            mode: "execute",
-            database: database.display().to_string(),
-            surfnet_id: file.core.network.surfnet_id.clone(),
-            funding_scheme: workflow.schedule.scheme(),
-            fleet_run_ids: workflow.roster.fleet_run_ids.clone(),
-            funding_run_id: workflow.funding_run_id,
-            operator_fleets: workflow.roster.fleet_run_ids.len(),
-            fleet_agents: workflow.roster.recipients.len(),
-            disbursers: workflow.disburser_agents.len(),
-            rounds: config.rounds,
-            top_ups_per_account: config.top_ups_per_account,
-            denomination_lamports: config.denomination_lamports,
-            round_interval_seconds: workflow.round_interval_seconds,
-            scheduled_transfers: workflow.execution.actions().len(),
-            scheduled_principal_lamports: funding_principal(&workflow.execution)?,
-            disburser_requirements: funding_disburser_requirements(file, workflow)?,
-            pool_deposits: pool_deposit_scope(workflow.schedule.scheme()),
-            action_limit: limit,
-            actions_inserted,
-            claimed_actions,
-            recovery_claimed,
-            recovery,
-            workers,
-            snapshot: Some(snapshot),
-            network_preflight: true,
-            signer_loaded: true,
-            stop_reason,
-            state_changed: registration_changed
-                || recovery_claimed != 0
-                || actions_inserted != 0
-                || claimed_actions != 0,
-        };
+        let mut report = FundingReport::for_workflow(file, database, workflow, limit, "execute")?;
+        report.actions_inserted = actions_inserted;
+        report.claimed_actions = claimed_actions;
+        report.recovery_claimed = recovery_claimed;
+        report.recovery = recovery;
+        report.workers = workers;
+        report.snapshot = Some(snapshot);
+        report.network_preflight = true;
+        report.signer_loaded = true;
+        report.stop_reason = stop_reason;
+        report.state_changed = registration_changed
+            || recovery_claimed != 0
+            || actions_inserted != 0
+            || claimed_actions != 0;
         write_json(output, &report)?;
         if let Some(reason) = stop_reason {
             bail!("operator stop activated by {reason}; in-flight funding work settled");

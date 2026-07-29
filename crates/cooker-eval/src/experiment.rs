@@ -14,7 +14,8 @@ use uuid::Uuid;
 
 use crate::{
     AttackWeights, EvaluationMetrics, FeatureConfig, FeatureFamily, FeatureSet, GroundTruth,
-    ObservationDataset, PairScore, evaluate_scores, extract_features, score_pairs,
+    ObservationDataset, PairScore, evaluate_scores, extract_features, metrics::count_as_f64,
+    score_pairs,
 };
 
 /// Planner family compared under the same fleet and action budget.
@@ -632,10 +633,6 @@ fn funding_observation(plan: &FundingPlan, features: &FeatureSet) -> FundingObse
         min_batch_recipients: batches.values().copied().min().unwrap_or(0),
         mean_observed_funders: mean(&observed),
     }
-}
-
-fn count_as_f64(value: usize) -> f64 {
-    u32::try_from(value).map_or(f64::from(u32::MAX), f64::from)
 }
 
 #[allow(clippy::too_many_arguments)]

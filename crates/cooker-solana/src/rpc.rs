@@ -563,242 +563,6 @@ impl JsonRpcClient {
         }
         Ok(())
     }
-
-    async fn latest_blockhash(&self) -> Result<LatestBlockhash, RpcError> {
-        let result: ContextResponse<LatestBlockhashValue> = self
-            .request(GET_LATEST_BLOCKHASH, json!([{"commitment": "confirmed"}]))
-            .await?;
-        let blockhash = Hash::from_str(&result.value.blockhash).map_err(|error| {
-            RpcError::invalid_response(GET_LATEST_BLOCKHASH, format!("invalid blockhash: {error}"))
-        })?;
-        Ok(LatestBlockhash {
-            context_slot: result.context.slot,
-            blockhash,
-            last_valid_block_height: result.value.last_valid_block_height,
-        })
-    }
-
-    async fn balance(&self, address: &Pubkey) -> Result<u64, RpcError> {
-        let result: ContextResponse<u64> = self
-            .request(
-                GET_BALANCE,
-                json!([address.to_string(), {"commitment": "confirmed"}]),
-            )
-            .await?;
-        Ok(result.value)
-    }
-
-    async fn block_height(&self) -> Result<u64, RpcError> {
-        self.request(GET_BLOCK_HEIGHT, json!([{"commitment": "confirmed"}]))
-            .await
-    }
-
-    async fn account(&self, address: &Pubkey) -> Result<Option<AccountInfo>, RpcError> {
-        let result: ContextResponse<Option<AccountValue>> = self
-            .request(
-                GET_ACCOUNT_INFO,
-                json!([
-                    address.to_string(),
-                    {"commitment": "confirmed", "encoding": "base64"}
-                ]),
-            )
-            .await?;
-        result
-            .value
-            .as_ref()
-            .map(|value| decode_account(result.context.slot, value))
-            .transpose()
-    }
-
-    async fn minimum_balance_for_rent_exemption(&self, data_len: usize) -> Result<u64, RpcError> {
-        self.request(
-            GET_MINIMUM_RENT,
-            json!([data_len, {"commitment": "confirmed"}]),
-        )
-        .await
-    }
-
-    async fn epoch_info(&self) -> Result<EpochInfo, RpcError> {
-        let value: EpochInfoValue = self
-            .request(GET_EPOCH_INFO, json!([{"commitment": "confirmed"}]))
-            .await?;
-        Ok(value.into())
-    }
-
-    async fn stake_minimum_delegation(&self) -> Result<u64, RpcError> {
-        let result: ContextResponse<u64> = self
-            .request(
-                GET_STAKE_MINIMUM_DELEGATION,
-                json!([{"commitment": "confirmed"}]),
-            )
-            .await?;
-        Ok(result.value)
-    }
-
-    async fn active_vote_accounts(&self) -> Result<Vec<VoteAccount>, RpcError> {
-        let response: VoteAccountsValue = self
-            .request(GET_VOTE_ACCOUNTS, json!([{"commitment": "confirmed"}]))
-            .await?;
-        response
-            .current
-            .into_iter()
-            .map(|account| {
-                let vote_pubkey = Pubkey::from_str(&account.vote_pubkey).map_err(|error| {
-                    RpcError::invalid_response(
-                        GET_VOTE_ACCOUNTS,
-                        format!("invalid vote account pubkey: {error}"),
-                    )
-                })?;
-                Ok(VoteAccount {
-                    vote_pubkey,
-                    activated_stake: account.activated_stake,
-                })
-            })
-            .collect()
-    }
-
-    async fn slot_leaders(&self, start_slot: u64, limit: u64) -> Result<Vec<Pubkey>, RpcError> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let window = limit.min(MAX_SLOT_LEADER_WINDOW);
-        let leaders: Vec<String> = self
-            .request(GET_SLOT_LEADERS, json!([start_slot, window]))
-            .await?;
-        leaders
-            .into_iter()
-            .map(|leader| {
-                Pubkey::from_str(&leader).map_err(|error| {
-                    RpcError::invalid_response(
-                        GET_SLOT_LEADERS,
-                        format!("invalid slot leader pubkey: {error}"),
-                    )
-                })
-            })
-            .collect()
-    }
-
-    async fn time_travel_to_epoch(&self, epoch: u64) -> Result<EpochInfo, RpcError> {
-        let value: EpochInfoValue = self
-            .request(TIME_TRAVEL, json!([{"absoluteEpoch": epoch}]))
-            .await?;
-        Ok(value.into())
-    }
-
-    async fn time_travel_to_slot(&self, slot: u64) -> Result<EpochInfo, RpcError> {
-        let value: EpochInfoValue = self
-            .request(TIME_TRAVEL, json!([{"absoluteSlot": slot}]))
-            .await?;
-        Ok(value.into())
-    }
-
-    async fn local_signatures(&self, limit: u64) -> Result<Vec<LocalSignatureRecord>, RpcError> {
-        let response: ContextResponse<Vec<LocalSignatureValue>> =
-            self.request(GET_LOCAL_SIGNATURES, json!([limit])).await?;
-        response
-            .value
-            .into_iter()
-            .map(|record| {
-                let signature = Signature::from_str(&record.signature).map_err(|error| {
-                    RpcError::invalid_response(
-                        GET_LOCAL_SIGNATURES,
-                        format!("invalid local signature: {error}"),
-                    )
-                })?;
-                Ok(LocalSignatureRecord {
-                    signature,
-                    error: record.error,
-                    logs: record.logs,
-                })
-            })
-            .collect()
-    }
-
-    async fn simulate_transaction(&self, transaction: &[u8]) -> Result<RpcSimulation, RpcError> {
-        let encoded = BASE64_STANDARD.encode(transaction);
-        let result: ContextResponse<SimulationValue> = self
-            .request(
-                SIMULATE_TRANSACTION,
-                json!([
-                    encoded,
-                    {
-                        "commitment": "processed",
-                        "encoding": "base64",
-                        "replaceRecentBlockhash": false,
-                        "sigVerify": true
-                    }
-                ]),
-            )
-            .await?;
-        Ok(RpcSimulation {
-            context_slot: result.context.slot,
-            error: result.value.error,
-            logs: result.value.logs.unwrap_or_default(),
-            units_consumed: result.value.units_consumed,
-        })
-    }
-
-    async fn send_transaction(&self, transaction: &[u8]) -> Result<Signature, RpcError> {
-        let encoded = BASE64_STANDARD.encode(transaction);
-        let signature: String = self
-            .request(
-                SEND_TRANSACTION,
-                json!([
-                    encoded,
-                    {
-                        "encoding": "base64",
-                        "maxRetries": 0,
-                        "preflightCommitment": "processed",
-                        "skipPreflight": false
-                    }
-                ]),
-            )
-            .await?;
-        Signature::from_str(&signature).map_err(|error| {
-            RpcError::invalid_response(SEND_TRANSACTION, format!("invalid signature: {error}"))
-        })
-    }
-
-    async fn signature_status(
-        &self,
-        signature: &Signature,
-    ) -> Result<Option<SignatureStatus>, RpcError> {
-        let result: ContextResponse<Vec<Option<SignatureStatusValue>>> = self
-            .request(
-                GET_SIGNATURE_STATUSES,
-                json!([[signature.to_string()], {"searchTransactionHistory": true}]),
-            )
-            .await?;
-        let value = result.value.into_iter().next().ok_or_else(|| {
-            RpcError::invalid_response(GET_SIGNATURE_STATUSES, "status array was empty")
-        })?;
-        Ok(value.map(|status| SignatureStatus {
-            slot: status.slot,
-            confirmations: status.confirmations,
-            error: status.error,
-            confirmation_status: status.confirmation_status,
-        }))
-    }
-
-    async fn transaction(
-        &self,
-        signature: &Signature,
-    ) -> Result<Option<TransactionRecord>, RpcError> {
-        let result: Option<TransactionValue> = self
-            .request(
-                GET_TRANSACTION,
-                json!([
-                    signature.to_string(),
-                    {
-                        "commitment": "confirmed",
-                        "encoding": "json",
-                        "maxSupportedTransactionVersion": 0
-                    }
-                ]),
-            )
-            .await?;
-        result.map(decode_transaction).transpose()
-    }
 }
 
 /// Chain gateway that proves the network identity of its endpoint before it can be used.
@@ -936,7 +700,18 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] for transport, JSON-RPC, or response decoding failures.
     pub async fn latest_blockhash(&self) -> Result<LatestBlockhash, RpcError> {
-        self.rpc.latest_blockhash().await
+        let result: ContextResponse<LatestBlockhashValue> = self
+            .rpc
+            .request(GET_LATEST_BLOCKHASH, json!([{"commitment": "confirmed"}]))
+            .await?;
+        let blockhash = Hash::from_str(&result.value.blockhash).map_err(|error| {
+            RpcError::invalid_response(GET_LATEST_BLOCKHASH, format!("invalid blockhash: {error}"))
+        })?;
+        Ok(LatestBlockhash {
+            context_slot: result.context.slot,
+            blockhash,
+            last_valid_block_height: result.value.last_valid_block_height,
+        })
     }
 
     /// Read a native account balance from the verified endpoint.
@@ -945,7 +720,14 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] for transport, JSON-RPC, or response decoding failures.
     pub async fn balance(&self, address: &Pubkey) -> Result<u64, RpcError> {
-        self.rpc.balance(address).await
+        let result: ContextResponse<u64> = self
+            .rpc
+            .request(
+                GET_BALANCE,
+                json!([address.to_string(), {"commitment": "confirmed"}]),
+            )
+            .await?;
+        Ok(result.value)
     }
 
     /// Read the confirmed block height used for blockhash-expiry reconciliation.
@@ -954,7 +736,9 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] for transport, JSON-RPC, or response decoding failures.
     pub async fn block_height(&self) -> Result<u64, RpcError> {
-        self.rpc.block_height().await
+        self.rpc
+            .request(GET_BLOCK_HEIGHT, json!([{"commitment": "confirmed"}]))
+            .await
     }
 
     /// Read and decode an account from the verified endpoint.
@@ -963,7 +747,21 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] for transport, JSON-RPC, or invalid owner/base64 response data.
     pub async fn account(&self, address: &Pubkey) -> Result<Option<AccountInfo>, RpcError> {
-        self.rpc.account(address).await
+        let result: ContextResponse<Option<AccountValue>> = self
+            .rpc
+            .request(
+                GET_ACCOUNT_INFO,
+                json!([
+                    address.to_string(),
+                    {"commitment": "confirmed", "encoding": "base64"}
+                ]),
+            )
+            .await?;
+        result
+            .value
+            .as_ref()
+            .map(|value| decode_account(result.context.slot, value))
+            .transpose()
     }
 
     /// Return the endpoint's rent-exempt minimum for an account data length.
@@ -975,7 +773,12 @@ impl SolanaGateway {
         &self,
         data_len: usize,
     ) -> Result<u64, RpcError> {
-        self.rpc.minimum_balance_for_rent_exemption(data_len).await
+        self.rpc
+            .request(
+                GET_MINIMUM_RENT,
+                json!([data_len, {"commitment": "confirmed"}]),
+            )
+            .await
     }
 
     /// Return the endpoint's current epoch and absolute slot.
@@ -984,7 +787,11 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] for transport, JSON-RPC, or response decoding failures.
     pub async fn epoch_info(&self) -> Result<EpochInfo, RpcError> {
-        self.rpc.epoch_info().await
+        let value: EpochInfoValue = self
+            .rpc
+            .request(GET_EPOCH_INFO, json!([{"commitment": "confirmed"}]))
+            .await?;
+        Ok(value.into())
     }
 
     /// Return the endpoint's current native stake minimum delegation.
@@ -993,7 +800,14 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] for transport, JSON-RPC, or response decoding failures.
     pub async fn stake_minimum_delegation(&self) -> Result<u64, RpcError> {
-        self.rpc.stake_minimum_delegation().await
+        let result: ContextResponse<u64> = self
+            .rpc
+            .request(
+                GET_STAKE_MINIMUM_DELEGATION,
+                json!([{"commitment": "confirmed"}]),
+            )
+            .await?;
+        Ok(result.value)
     }
 
     /// Return active validator vote accounts visible through the endpoint.
@@ -1002,7 +816,26 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] for transport, JSON-RPC, or invalid vote-account data.
     pub async fn active_vote_accounts(&self) -> Result<Vec<VoteAccount>, RpcError> {
-        self.rpc.active_vote_accounts().await
+        let response: VoteAccountsValue = self
+            .rpc
+            .request(GET_VOTE_ACCOUNTS, json!([{"commitment": "confirmed"}]))
+            .await?;
+        response
+            .current
+            .into_iter()
+            .map(|account| {
+                let vote_pubkey = Pubkey::from_str(&account.vote_pubkey).map_err(|error| {
+                    RpcError::invalid_response(
+                        GET_VOTE_ACCOUNTS,
+                        format!("invalid vote account pubkey: {error}"),
+                    )
+                })?;
+                Ok(VoteAccount {
+                    vote_pubkey,
+                    activated_stake: account.activated_stake,
+                })
+            })
+            .collect()
     }
 
     /// Return the block leader assigned to each slot in `[start_slot, start_slot + limit)`.
@@ -1015,7 +848,25 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] for transport, JSON-RPC, or invalid leader-address response data.
     pub async fn slot_leaders(&self, start_slot: u64, limit: u64) -> Result<Vec<Pubkey>, RpcError> {
-        self.rpc.slot_leaders(start_slot, limit).await
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let window = limit.min(MAX_SLOT_LEADER_WINDOW);
+        let leaders: Vec<String> = self
+            .rpc
+            .request(GET_SLOT_LEADERS, json!([start_slot, window]))
+            .await?;
+        leaders
+            .into_iter()
+            .map(|leader| {
+                Pubkey::from_str(&leader).map_err(|error| {
+                    RpcError::invalid_response(
+                        GET_SLOT_LEADERS,
+                        format!("invalid slot leader pubkey: {error}"),
+                    )
+                })
+            })
+            .collect()
     }
 
     /// Advance the verified local Surfpool clock to an absolute future epoch.
@@ -1024,7 +875,11 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] when Surfpool rejects backward travel or cannot update its clock.
     pub async fn time_travel_to_epoch(&self, epoch: u64) -> Result<EpochInfo, RpcError> {
-        self.rpc.time_travel_to_epoch(epoch).await
+        let value: EpochInfoValue = self
+            .rpc
+            .request(TIME_TRAVEL, json!([{"absoluteEpoch": epoch}]))
+            .await?;
+        Ok(value.into())
     }
 
     /// Advance the verified local Surfpool clock to an absolute future slot.
@@ -1033,7 +888,11 @@ impl SolanaGateway {
     ///
     /// Returns [`RpcError`] when Surfpool rejects backward travel or cannot update its clock.
     pub async fn time_travel_to_slot(&self, slot: u64) -> Result<EpochInfo, RpcError> {
-        self.rpc.time_travel_to_slot(slot).await
+        let value: EpochInfoValue = self
+            .rpc
+            .request(TIME_TRAVEL, json!([{"absoluteSlot": slot}]))
+            .await?;
+        Ok(value.into())
     }
 
     /// Return the most recent transactions executed locally by Surfpool.
@@ -1045,7 +904,27 @@ impl SolanaGateway {
         &self,
         limit: u64,
     ) -> Result<Vec<LocalSignatureRecord>, RpcError> {
-        self.rpc.local_signatures(limit).await
+        let response: ContextResponse<Vec<LocalSignatureValue>> = self
+            .rpc
+            .request(GET_LOCAL_SIGNATURES, json!([limit]))
+            .await?;
+        response
+            .value
+            .into_iter()
+            .map(|record| {
+                let signature = Signature::from_str(&record.signature).map_err(|error| {
+                    RpcError::invalid_response(
+                        GET_LOCAL_SIGNATURES,
+                        format!("invalid local signature: {error}"),
+                    )
+                })?;
+                Ok(LocalSignatureRecord {
+                    signature,
+                    error: record.error,
+                    logs: record.logs,
+                })
+            })
+            .collect()
     }
 
     /// Simulate signed wire bytes through the verified endpoint with signature verification.
@@ -1057,7 +936,28 @@ impl SolanaGateway {
         &self,
         transaction: &[u8],
     ) -> Result<RpcSimulation, RpcError> {
-        self.rpc.simulate_transaction(transaction).await
+        let encoded = BASE64_STANDARD.encode(transaction);
+        let result: ContextResponse<SimulationValue> = self
+            .rpc
+            .request(
+                SIMULATE_TRANSACTION,
+                json!([
+                    encoded,
+                    {
+                        "commitment": "processed",
+                        "encoding": "base64",
+                        "replaceRecentBlockhash": false,
+                        "sigVerify": true
+                    }
+                ]),
+            )
+            .await?;
+        Ok(RpcSimulation {
+            context_slot: result.context.slot,
+            error: result.value.error,
+            logs: result.value.logs.unwrap_or_default(),
+            units_consumed: result.value.units_consumed,
+        })
     }
 
     /// Submit signed wire bytes to the verified endpoint.
@@ -1067,7 +967,25 @@ impl SolanaGateway {
     /// Returns a classified [`RpcError`]. Failures after the request may have reached the
     /// endpoint are classified as an unknown outcome and must be reconciled by signature.
     pub async fn send_transaction(&self, transaction: &[u8]) -> Result<Signature, RpcError> {
-        self.rpc.send_transaction(transaction).await
+        let encoded = BASE64_STANDARD.encode(transaction);
+        let signature: String = self
+            .rpc
+            .request(
+                SEND_TRANSACTION,
+                json!([
+                    encoded,
+                    {
+                        "encoding": "base64",
+                        "maxRetries": 0,
+                        "preflightCommitment": "processed",
+                        "skipPreflight": false
+                    }
+                ]),
+            )
+            .await?;
+        Signature::from_str(&signature).map_err(|error| {
+            RpcError::invalid_response(SEND_TRANSACTION, format!("invalid signature: {error}"))
+        })
     }
 
     /// Read a transaction signature status.
@@ -1079,7 +997,22 @@ impl SolanaGateway {
         &self,
         signature: &Signature,
     ) -> Result<Option<SignatureStatus>, RpcError> {
-        self.rpc.signature_status(signature).await
+        let result: ContextResponse<Vec<Option<SignatureStatusValue>>> = self
+            .rpc
+            .request(
+                GET_SIGNATURE_STATUSES,
+                json!([[signature.to_string()], {"searchTransactionHistory": true}]),
+            )
+            .await?;
+        let value = result.value.into_iter().next().ok_or_else(|| {
+            RpcError::invalid_response(GET_SIGNATURE_STATUSES, "status array was empty")
+        })?;
+        Ok(value.map(|status| SignatureStatus {
+            slot: status.slot,
+            confirmations: status.confirmations,
+            error: status.error,
+            confirmation_status: status.confirmation_status,
+        }))
     }
 
     /// Read a confirmed transaction and its execution metadata.
@@ -1091,7 +1024,21 @@ impl SolanaGateway {
         &self,
         signature: &Signature,
     ) -> Result<Option<TransactionRecord>, RpcError> {
-        self.rpc.transaction(signature).await
+        let result: Option<TransactionValue> = self
+            .rpc
+            .request(
+                GET_TRANSACTION,
+                json!([
+                    signature.to_string(),
+                    {
+                        "commitment": "confirmed",
+                        "encoding": "json",
+                        "maxSupportedTransactionVersion": 0
+                    }
+                ]),
+            )
+            .await?;
+        result.map(decode_transaction).transpose()
     }
 }
 
@@ -1499,6 +1446,22 @@ mod tests {
         server.uri().parse()
     }
 
+    /// Answer `getVersion` as a Surfpool endpoint of the pinned version.
+    async fn mount_surfpool_version(server: &MockServer) {
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": GET_VERSION})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "surfnet-version": EXPECTED_SURFPOOL_VERSION,
+                    "solana-core": "4.0.0"
+                }
+            })))
+            .mount(server)
+            .await;
+    }
+
     #[tokio::test]
     async fn surfpool_connect_refuses_a_public_cluster_endpoint()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -1549,18 +1512,7 @@ mod tests {
     async fn connect_requires_surfnet_info_after_version() -> Result<(), Box<dyn std::error::Error>>
     {
         let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(body_partial_json(json!({"method": GET_VERSION})))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": {
-                    "surfnet-version": EXPECTED_SURFPOOL_VERSION,
-                    "solana-core": "4.0.0"
-                }
-            })))
-            .mount(&server)
-            .await;
+        mount_surfpool_version(&server).await;
         Mock::given(method("POST"))
             .and(body_partial_json(json!({"method": GET_SURFNET_INFO})))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -1583,13 +1535,23 @@ mod tests {
     async fn http_failure_after_send_is_unknown_outcome() -> Result<(), Box<dyn std::error::Error>>
     {
         let server = MockServer::start().await;
+        mount_surfpool_version(&server).await;
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": GET_SURFNET_INFO})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {"value": {}}
+            })))
+            .mount(&server)
+            .await;
         Mock::given(method("POST"))
             .and(body_partial_json(json!({"method": SEND_TRANSACTION})))
             .respond_with(ResponseTemplate::new(503).set_body_string("response lost after submit"))
             .mount(&server)
             .await;
-        let rpc = JsonRpcClient::new(endpoint(&server)?)?;
-        let error = rpc
+        let gateway = SolanaGateway::connect(endpoint(&server)?).await?;
+        let error = gateway
             .send_transaction(&[1, 2, 3])
             .await
             .err()

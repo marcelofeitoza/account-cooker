@@ -81,12 +81,6 @@ impl FleetRuntime {
         })
     }
 
-    /// Number of independently routed agent signers.
-    #[must_use]
-    pub fn agent_count(&self) -> usize {
-        self.engines.len()
-    }
-
     /// Execute one normal lease through the engine registered for its durable agent.
     ///
     /// # Errors

@@ -1,7 +1,6 @@
 //! Side-effect boundaries implemented by the store, runtime, and chain crates.
 
 use chrono::{DateTime, Utc};
-use rand_chacha::ChaCha12Rng;
 
 use crate::{
     domain::{
@@ -12,17 +11,6 @@ use crate::{
     error::CookerError,
     trace::TraceEvent,
 };
-
-/// Pure behavior model that plans exactly one next action.
-pub trait BehaviorModel: Send + Sync {
-    /// Plan from a stable agent snapshot and decision-local RNG.
-    fn plan_next(
-        &self,
-        agent: &AgentSnapshot,
-        now: DateTime<Utc>,
-        rng: &mut ChaCha12Rng,
-    ) -> Result<PlannedAction, CookerError>;
-}
 
 /// Pure pre-execution safety policy.
 pub trait Policy: Send + Sync {

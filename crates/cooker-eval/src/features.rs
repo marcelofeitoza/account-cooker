@@ -6,6 +6,8 @@ use chrono::{DateTime, Timelike, Utc};
 use cooker_core::{ActionKind, AgentId, TraceEvent};
 use serde::{Deserialize, Serialize};
 
+use crate::metrics::count_as_f64;
+
 const HOURS_PER_DAY: usize = 24;
 const ACTION_KINDS: usize = 5;
 const BIGRAMS: usize = ACTION_KINDS * ACTION_KINDS;
@@ -214,10 +216,6 @@ fn normalize_slice(values: &mut [f64]) {
             *value /= sum;
         }
     }
-}
-
-fn count_as_f64(value: usize) -> f64 {
-    u32::try_from(value).map_or(f64::from(u32::MAX), f64::from)
 }
 
 #[cfg(test)]

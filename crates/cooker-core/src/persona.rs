@@ -327,88 +327,35 @@ fn duration(min_seconds: u64, max_seconds: u64) -> DurationRange {
 
 fn standard_transitions(transacting_repeat: u32, holding_repeat: u32) -> Vec<StateTransition> {
     use SessionState::{Active, CoolingDown, Dormant, Holding, Transacting};
-    vec![
-        StateTransition {
-            from: Dormant,
-            to: Active,
-            weight: 85,
-        },
-        StateTransition {
-            from: Dormant,
-            to: Dormant,
-            weight: 15,
-        },
-        StateTransition {
-            from: Active,
-            to: Transacting,
-            weight: 65,
-        },
-        StateTransition {
-            from: Active,
-            to: Holding,
-            weight: 10,
-        },
-        StateTransition {
-            from: Active,
-            to: CoolingDown,
-            weight: 15,
-        },
-        StateTransition {
-            from: Active,
-            to: Active,
-            weight: 10,
-        },
-        StateTransition {
-            from: Transacting,
-            to: Transacting,
-            weight: transacting_repeat,
-        },
-        StateTransition {
-            from: Transacting,
-            to: Holding,
-            weight: 15,
-        },
-        StateTransition {
-            from: Transacting,
-            to: CoolingDown,
-            weight: 45,
-        },
-        StateTransition {
-            from: Transacting,
-            to: Active,
-            weight: 10,
-        },
-        StateTransition {
-            from: Holding,
-            to: Holding,
-            weight: holding_repeat,
-        },
-        StateTransition {
-            from: Holding,
-            to: Active,
-            weight: 30,
-        },
-        StateTransition {
-            from: Holding,
-            to: CoolingDown,
-            weight: 20,
-        },
-        StateTransition {
-            from: CoolingDown,
-            to: Dormant,
-            weight: 55,
-        },
-        StateTransition {
-            from: CoolingDown,
-            to: Active,
-            weight: 40,
-        },
-        StateTransition {
-            from: CoolingDown,
-            to: CoolingDown,
-            weight: 5,
-        },
+    // Rows are read as (from, to, weight); every row's weights are relative within its `from`.
+    [
+        (Dormant, Active, 85),
+        (Dormant, Dormant, 15),
+        (Active, Transacting, 65),
+        (Active, Holding, 10),
+        (Active, CoolingDown, 15),
+        (Active, Active, 10),
+        (Transacting, Transacting, transacting_repeat),
+        (Transacting, Holding, 15),
+        (Transacting, CoolingDown, 45),
+        (Transacting, Active, 10),
+        (Holding, Holding, holding_repeat),
+        (Holding, Active, 30),
+        (Holding, CoolingDown, 20),
+        (CoolingDown, Dormant, 55),
+        (CoolingDown, Active, 40),
+        (CoolingDown, CoolingDown, 5),
     ]
+    .into_iter()
+    .map(|(from, to, weight)| StateTransition { from, to, weight })
+    .collect()
+}
+
+/// Build a relative action-weight table from `(kind, weight)` rows.
+fn action_weights<const N: usize>(rows: [(ActionKind, u32); N]) -> Vec<ActionWeight> {
+    rows.into_iter()
+        .map(|(kind, weight)| ActionWeight { kind, weight })
+        .collect()
 }
 
 fn common(
@@ -461,20 +408,11 @@ fn casual() -> PersonaConfig {
         25,
         50,
     );
-    config.action_weights = vec![
-        ActionWeight {
-            kind: ActionKind::NativeTransfer,
-            weight: 35,
-        },
-        ActionWeight {
-            kind: ActionKind::JupiterSwap,
-            weight: 55,
-        },
-        ActionWeight {
-            kind: ActionKind::Idle,
-            weight: 10,
-        },
-    ];
+    config.action_weights = action_weights([
+        (ActionKind::NativeTransfer, 35),
+        (ActionKind::JupiterSwap, 55),
+        (ActionKind::Idle, 10),
+    ]);
     config
 }
 
@@ -482,20 +420,11 @@ fn trader() -> PersonaConfig {
     let mut config = common("trader", -3 * 60, vec![window(8, 0, 23, 30)], 9_000, 65, 20);
     config.state_durations.transacting = duration(20, 5 * 60);
     config.amount.jitter_bps = 3_000;
-    config.action_weights = vec![
-        ActionWeight {
-            kind: ActionKind::NativeTransfer,
-            weight: 10,
-        },
-        ActionWeight {
-            kind: ActionKind::JupiterSwap,
-            weight: 85,
-        },
-        ActionWeight {
-            kind: ActionKind::Idle,
-            weight: 5,
-        },
-    ];
+    config.action_weights = action_weights([
+        (ActionKind::NativeTransfer, 10),
+        (ActionKind::JupiterSwap, 85),
+        (ActionKind::Idle, 5),
+    ]);
     config
 }
 
@@ -509,20 +438,11 @@ fn saver() -> PersonaConfig {
         75,
     );
     config.state_durations.holding = duration(60 * 60, 6 * 60 * 60);
-    config.action_weights = vec![
-        ActionWeight {
-            kind: ActionKind::NativeTransfer,
-            weight: 60,
-        },
-        ActionWeight {
-            kind: ActionKind::JupiterSwap,
-            weight: 25,
-        },
-        ActionWeight {
-            kind: ActionKind::Idle,
-            weight: 15,
-        },
-    ];
+    config.action_weights = action_weights([
+        (ActionKind::NativeTransfer, 60),
+        (ActionKind::JupiterSwap, 25),
+        (ActionKind::Idle, 15),
+    ]);
     config
 }
 
@@ -535,24 +455,12 @@ fn explorer() -> PersonaConfig {
         40,
         35,
     );
-    config.action_weights = vec![
-        ActionWeight {
-            kind: ActionKind::NativeTransfer,
-            weight: 30,
-        },
-        ActionWeight {
-            kind: ActionKind::SplTransfer,
-            weight: 20,
-        },
-        ActionWeight {
-            kind: ActionKind::JupiterSwap,
-            weight: 45,
-        },
-        ActionWeight {
-            kind: ActionKind::Idle,
-            weight: 5,
-        },
-    ];
+    config.action_weights = action_weights([
+        (ActionKind::NativeTransfer, 30),
+        (ActionKind::SplTransfer, 20),
+        (ActionKind::JupiterSwap, 45),
+        (ActionKind::Idle, 5),
+    ]);
     config
 }
 

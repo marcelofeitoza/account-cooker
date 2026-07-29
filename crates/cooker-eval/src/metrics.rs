@@ -310,7 +310,11 @@ fn ratio(numerator: usize, denominator: usize) -> f64 {
     }
 }
 
-fn count_as_f64(value: usize) -> f64 {
+/// Widen a count to `f64` without a lossy cast, saturating at `u32::MAX`.
+///
+/// Every count this crate divides by is a per-run population, so the saturation point is far
+/// above any dataset the evaluator accepts.
+pub(crate) fn count_as_f64(value: usize) -> f64 {
     u32::try_from(value).map_or(f64::from(u32::MAX), f64::from)
 }
 
